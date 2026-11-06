@@ -370,7 +370,7 @@ The owner wants the product to feel vibrant, competitive, and alive: motion grap
 **Files:**
 - Create: `Procfile`, `.python-version`, `backend/Dockerfile`, `frontend/vercel.json`, `README.md`, `.github/workflows/ci.yml`
 
-- [ ] **Step 1:** Write the `Procfile` (`web: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips='*'`), confirming how Heroku's Python buildpack handles a uv project in a `backend/` subdirectory; the Dockerfile with the same command so the app stays portable to a free host; and `vercel.json` with SPA rewrites.
+- [ ] **Step 1:** Write the `Procfile` (`web: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1`), confirming how Heroku's Python buildpack handles a uv project in a `backend/` subdirectory; the Dockerfile with the same command so the app stays portable to a free host; and `vercel.json` with SPA rewrites.
 - [ ] **Step 2:** Write the README: setup, fake-provider quickstart, architecture diagram, env table, known limits (§18 honest limits, single worker, in-flight debates lost on restart), and no unmeasured metrics.
 - [ ] **Step 3:** Normalise Heroku's `postgres://` `DATABASE_URL` to `postgresql+asyncpg://` in `config.py`, with SSL enabled and a test. Add CI for pytest, frontend tests, and build, all with the fake provider.
 - [ ] **Step 4:** Verify: `docker build ./backend` if Docker is available, and CI passes on the PR. If Docker is not available, say so.
