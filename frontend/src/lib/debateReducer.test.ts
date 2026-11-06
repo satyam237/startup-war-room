@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { debateReducer, initialDebateState, type DebateAction } from './debateReducer'
+import { debateReducer, initialDebateState, type DebateAction, type Verdict } from './debateReducer'
+
+const score = { score: 5, why: 'ok' }
+const VERDICT: Verdict = {
+  recommendation: 'go',
+  confidence: 0.6,
+  scorecard: { market: score, customer_pull: score, feasibility: score, defensibility: score, timing: score },
+  risks: [],
+  experiments: [],
+  one_line_summary: 'Build it.',
+  fallback: false,
+}
 
 const run = (actions: DebateAction[]) => actions.reduce(debateReducer, initialDebateState)
 const start = (seq: number, turn_id = 't1'): DebateAction => ({
@@ -44,7 +55,7 @@ describe('debateReducer', () => {
       { type: 'await_rebuttal', seq: 4, data: { timeout_s: 60 } },
       { type: 'rebuttal_received', seq: 5, data: { text: 'hi' } },
       { type: 'turn_failed', seq: 6, data: { agent: 'cto', round: 2, note: 'timed out' } },
-      { type: 'verdict', seq: 7, data: { recommendation: 'go' } },
+      { type: 'verdict', seq: 7, data: VERDICT },
       { type: 'error', seq: 8, data: { message: 'boom', recoverable: true } },
       { type: 'done', seq: 9, data: { status: 'complete' } },
     ])
@@ -54,7 +65,7 @@ describe('debateReducer', () => {
     expect(s.awaitingRebuttal).toBeNull()
     expect(s.rebuttal).toBe('hi')
     expect(s.failures).toEqual([{ agent: 'cto', round: 2, note: 'timed out' }])
-    expect(s.verdict).toEqual({ recommendation: 'go' })
+    expect(s.verdict).toEqual(VERDICT)
     expect(s.error).toEqual({ message: 'boom', recoverable: true })
     expect(s.status).toBe('complete')
   })

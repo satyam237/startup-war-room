@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, createDebate, saveDeleteToken, type CreateDebateBody } from '../lib/api'
 import { AGENTS } from '../lib/debateReducer'
 
@@ -40,7 +40,8 @@ function withAnswers(pitch: string, questions: string[], answers: string[]): str
 
 export default function Pitch() {
   const navigate = useNavigate()
-  const [pitch, setPitch] = useState('')
+  const location = useLocation()
+  const [pitch, setPitch] = useState<string>((location.state as { pitch?: string } | null)?.pitch ?? '')
   const [targetUser, setTargetUser] = useState('')
   const [pricing, setPricing] = useState('')
   const [stage, setStage] = useState('')

@@ -2,7 +2,26 @@ export type AgentId = 'vc' | 'customer' | 'cto' | 'competitor' | 'moderator'
 export const AGENTS: AgentId[] = ['vc', 'customer', 'cto', 'competitor', 'moderator']
 
 export type SetupStep = 'persona' | 'competitors' | 'ready'
-export type Verdict = Record<string, unknown>
+export interface ScoreItem { score: number; why: string }
+export interface Scorecard {
+  market: ScoreItem
+  customer_pull: ScoreItem
+  feasibility: ScoreItem
+  defensibility: ScoreItem
+  timing: ScoreItem
+}
+export interface Risk { rank: number; risk: string; severity: 'high' | 'med' | 'low'; raised_by: string }
+export interface Experiment { test: string; timebox_days: number; success_criteria: string; kill_criteria: string }
+/** Mirrors backend/app/models.py `Verdict`. */
+export interface Verdict {
+  recommendation: 'go' | 'pivot' | 'no_go'
+  confidence: number
+  scorecard: Scorecard
+  risks: Risk[]
+  experiments: Experiment[]
+  one_line_summary: string
+  fallback: boolean
+}
 
 export interface SetupData { step: SetupStep; message: string; persona?: unknown; competitors?: unknown }
 
