@@ -306,9 +306,11 @@ Implementers load the `frontend-design` skill. The product should feel like a te
 - [ ] **Step 2:** Run `npx playwright test`. Expected: PASS. Fix the owning code for any failure and keep the fix in this task.
 - [ ] **Step 3:** Commit `test(e2e): browser flows against fake provider`.
 
-### Task 16: Arena motion and visual identity — model: Sonnet 5.5
+### Task 16 (next phase, after v1): Arena motion and visual identity — model: Sonnet 5.5
 
-The owner wants the product to feel vibrant, competitive, and alive: motion graphics, animation, interactive text, bright colour, and themes. The current UI is restrained and has almost no motion. This task sets the product's visual identity across all three pages. Run it before Task 12.
+**Deferred by the owner on 2026-11-06. Not part of v1.**
+
+The owner wants the product to feel vibrant, competitive, and alive: motion graphics, animation, interactive text, bright colour, and themes. The current UI is restrained and has almost no motion. This task sets the product's visual identity across all three pages.
 
 **Concept:** a live fight night for ideas. The debate is a contest with four challengers and a referee, and the founder's idea is in the ring.
 
