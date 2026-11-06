@@ -15,7 +15,6 @@ Results are rewritten after every debate, so an interrupted run keeps its data.
 import argparse
 import asyncio
 import json
-import logging
 import os
 import sys
 import time
@@ -32,7 +31,7 @@ import report  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.events import EventLog  # noqa: E402
 from app.graph import Deps, InMemoryStore, build_graph, initial_state, pending_rebuttal, resume_command  # noqa: E402
-from app.llm import get_gateway  # noqa: E402
+from app.llm import LLMError, LLMRefusal, get_gateway  # noqa: E402
 from app.models import Verdict  # noqa: E402
 from app.verdict import check_consistency  # noqa: E402
 
@@ -42,37 +41,70 @@ MAX_ROUNDS = 3
 WORD_CAP = 120
 
 
-class _LastWarning(logging.Handler):
-    """Remembers the latest warning from the app, so an early stop can say what went wrong."""
-
-    def __init__(self) -> None:
-        super().__init__(level=logging.WARNING)
-        self.message = ""
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.message = record.getMessage()[:300]
+START_ESTIMATE_USD = 0.50  # assumed cost of one debate until one has finished
 
 
-def failed(r: dict[str, Any]) -> bool:
-    return r["fallback"] or r["status"] != "complete"
+def outage_cause(r: dict[str, Any]) -> str | None:
+    """Why a debate failed like an outage (a crash, or a gateway error behind a fallback), else None.
+
+    A fallback with no readable cause, a budget_exceeded run and a judge validation fallback
+    are genuine outcomes, not outages.
+    """
+    if r["error"]:
+        return r["error"]
+    if r["status"] == "budget_exceeded" or not (r["fallback"] or r["status"] != "complete"):
+        return None
+    return r.get("cause")
 
 
-def failure_signature(r: dict[str, Any]) -> str:
-    return r["error"] or ("fallback verdict" if r["fallback"] else r["status"])
-
-
-def stop_reason(results: list[dict[str, Any]], spent: float, max_spend: float) -> str | None:
-    if spent >= max_spend:
+def stop_reason(
+    results: list[dict[str, Any]], spent: float, max_spend: float, inflight: int = 0, estimate: float = 0.0
+) -> str | None:
+    """`spent + inflight * estimate` is the ceiling check; the last FAIL_STREAK results decide an outage."""
+    if spent + inflight * estimate >= max_spend:
         return "max_spend"
-    if len(results) >= FAIL_STREAK and all(failed(r) for r in results):
-        if len({failure_signature(r) for r in results}) == 1:
+    tail = results[-FAIL_STREAK:]
+    if len(tail) == FAIL_STREAK:
+        causes = {outage_cause(r) for r in tail}
+        if len(causes) == 1 and None not in causes:
             return "same_failure"
     return None
 
 
+def _is_outage(exc: Exception) -> bool:
+    """A provider or key failure; refusals and structured-output validation failures are not."""
+    return not isinstance(exc, LLMRefusal) and not str(exc).startswith("structured output")
+
+
+class _RecordingGateway:
+    """Wraps the gateway for one debate and keeps the outage-type errors it raised."""
+
+    def __init__(self, gw: Any, causes: list[str]) -> None:
+        self._gw, self.causes = gw, causes
+
+    def _note(self, exc: LLMError) -> None:
+        if _is_outage(exc):
+            self.causes.append(f"{type(exc).__name__}: {exc}"[:200])
+
+    async def structured(self, *args: Any, **kwargs: Any):
+        try:
+            return await self._gw.structured(*args, **kwargs)
+        except LLMError as exc:
+            self._note(exc)
+            raise
+
+    async def stream_text(self, *args: Any, **kwargs: Any):
+        try:
+            async for piece in self._gw.stream_text(*args, **kwargs):
+                yield piece
+        except LLMError as exc:
+            self._note(exc)
+            raise
+
+
 def build_record(
     item: dict[str, Any], events: list[Any], result: dict[str, Any] | None, error: str | None,
-    latency_s: float, max_turns: int,
+    latency_s: float, max_turns: int, causes: list[str] | None = None,
 ) -> dict[str, Any]:
     turns = [e.data for e in events if e.event == "turn_end"]
     budget = (result or {}).get("budget") or {}
@@ -111,6 +143,7 @@ def build_record(
         "repeated_turns": sum(1 for e in events if e.event == "turn_reset" and e.data["reason"] == "repetition"),
         "total_turns": len(turns),
         "turn_failed": sum(1 for e in events if e.event == "turn_failed"),
+        "cause": (causes or [None])[0],
         "cap_violations": caps,
         "round1_stances": [report.stance(t["text"]) for t in turns if t["round"] == 1],
         "verdict": raw,
@@ -127,7 +160,8 @@ async def run_one(item: dict[str, Any]) -> dict[str, Any]:
             events.append(event)
 
     collector = asyncio.create_task(collect())
-    deps = Deps(gw=get_gateway(), log=log, settings=settings, store=InMemoryStore())
+    causes: list[str] = []
+    deps = Deps(gw=_RecordingGateway(get_gateway(), causes), log=log, settings=settings, store=InMemoryStore())
     graph = build_graph(deps, InMemorySaver())
     config = {"configurable": {"thread_id": item["id"]}}
     result: dict[str, Any] | None = None
@@ -142,7 +176,7 @@ async def run_one(item: dict[str, Any]) -> dict[str, Any]:
     latency = time.monotonic() - started
     log.close()
     await collector
-    return build_record(item, events, result, error, latency, settings.MAX_TURNS)
+    return build_record(item, events, result, error, latency, settings.MAX_TURNS, causes)
 
 
 def write_results(path: Path, doc: dict[str, Any]) -> None:
@@ -164,9 +198,7 @@ def _line(index: int, total: int, r: dict[str, Any], spent: float) -> str:
 
 async def run_all(
     items: list[dict[str, Any]], concurrency: int, max_spend: float, out: Path, provider: str
-) -> tuple[dict[str, Any], str]:
-    warning = _LastWarning()
-    logging.getLogger("app").addHandler(warning)
+) -> dict[str, Any]:
     doc: dict[str, Any] = {
         "meta": {
             "provider": provider,
@@ -181,40 +213,47 @@ async def run_all(
     }
     results: list[dict[str, Any]] = doc["results"]
     pending = list(items)
-    state = {"reason": None, "spent": 0.0}
+    state: dict[str, Any] = {"reason": None, "spent": 0.0, "inflight": 0, "estimate": START_ESTIMATE_USD}
     write_results(out, doc)
 
     async def worker() -> None:
         while pending and state["reason"] is None:
-            state["reason"] = stop_reason(results, state["spent"], max_spend)
+            # Debates still running count at the largest cost seen, so concurrency cannot overshoot.
+            state["reason"] = stop_reason(results, state["spent"], max_spend, state["inflight"], state["estimate"])
             if state["reason"] is not None:
                 return
-            r = await run_one(pending.pop(0))
+            item = pending.pop(0)
+            state["inflight"] += 1
+            try:
+                r = await run_one(item)
+            finally:
+                state["inflight"] -= 1
             results.append(r)
             state["spent"] += r["cost_usd"]
+            seen = max(x["cost_usd"] for x in results)
+            state["estimate"] = seen if seen > 0 else START_ESTIMATE_USD
             print(_line(len(results), len(items), r, state["spent"]), flush=True)
             write_results(out, doc)
-            state["reason"] = state["reason"] or stop_reason(results, state["spent"], max_spend)
+            state["reason"] = state["reason"] or stop_reason(
+                results, state["spent"], max_spend, state["inflight"], state["estimate"]
+            )
 
     try:
         await asyncio.gather(*(worker() for _ in range(max(concurrency, 1))))
     finally:
-        logging.getLogger("app").removeHandler(warning)
         doc["meta"]["finished"] = datetime.now(timezone.utc).isoformat()
-        doc["meta"]["status"] = "stopped" if state["reason"] else ("complete" if not pending else "interrupted")
+        doc["meta"]["status"] = "stopped" if state["reason"] else ("complete" if len(results) == len(items) else "interrupted")
         doc["meta"]["stop_reason"] = state["reason"]
         write_results(out, doc)
-    return doc, warning.message
+    return doc
 
 
-def _explain_stop(reason: str, results: list[dict[str, Any]], spent: float, max_spend: float, last: str) -> str:
+def _explain_stop(reason: str, results: list[dict[str, Any]], spent: float, max_spend: float) -> str:
     if reason == "max_spend":
         return f"STOPPED: spend ${spent:.4f} reached --max-spend ${max_spend:.2f} after {len(results)} debates."
-    sig = failure_signature(results[0])
-    detail = f" Last warning: {last}" if last else ""
     return (
-        f"STOPPED: the first {len(results)} debates all failed the same way ({sig}). "
-        f"Check the key, credits and models before spending more.{detail}"
+        f"STOPPED: the last {FAIL_STREAK} debates all failed with the same cause ({outage_cause(results[-1])}). "
+        "Check the key, credits and models before spending more."
     )
 
 
@@ -243,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if provider == "fake":
         print(report.NOT_MEANINGFUL)
-    doc, last = asyncio.run(run_all(items, args.concurrency, args.max_spend, out, provider))
+    doc = asyncio.run(run_all(items, args.concurrency, args.max_spend, out, provider))
     results = doc["results"]
     spent = sum(r["cost_usd"] for r in results)
     print()
@@ -251,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"results: {out}")
     reason = doc["meta"]["stop_reason"]
     if reason:
-        print(_explain_stop(reason, results, spent, args.max_spend, last))
+        print(_explain_stop(reason, results, spent, args.max_spend))
     return 1 if reason == "same_failure" else 0
 
 

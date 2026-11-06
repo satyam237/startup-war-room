@@ -15,7 +15,7 @@ from app.config import get_settings  # noqa: E402
 from app.llm import LLMError  # noqa: E402
 
 
-def test_pitches_are_twenty_five_per_category_unique():
+def test_pitches_are_twenty_with_five_per_category_and_unique_ids():
     pitches = json.loads((EVALS / "pitches.json").read_text())
     assert len(pitches) == 20
     assert Counter(p["category"] for p in pitches) == {"strong": 5, "weak": 5, "vague": 5, "adversarial": 5}
@@ -29,7 +29,7 @@ def canned(**over):
         "latency_s": 10.0, "tokens": 1000, "cost_usd": 0.10, "turns_used": 14,
         "fallback": False, "schema_valid": True, "consistency_errors": [],
         "repeated_turns": 0, "total_turns": 12, "turn_failed": 0,
-        "cap_violations": [], "round1_stances": ["positive", "negative", "negative", "negative"],
+        "cause": None, "cap_violations": [], "round1_stances": ["positive", "negative", "negative", "negative"],
     }
     base.update(over)
     return base
@@ -154,11 +154,79 @@ def test_stop_decision_on_spend_and_failure():
     ok = canned()
     assert run_evals.stop_reason([ok, ok], spent=4.9, max_spend=5.0) is None
     assert run_evals.stop_reason([ok], spent=5.0, max_spend=5.0) == "max_spend"
-    bad = canned(fallback=True, schema_valid=False)
-    assert run_evals.stop_reason([bad] * 3, spent=0.0, max_spend=5.0) == "same_failure"
-    assert run_evals.stop_reason([bad, bad, ok], spent=0.0, max_spend=5.0) is None
+    # in-flight debates count at the estimate
+    assert run_evals.stop_reason([ok], spent=4.0, max_spend=5.0, inflight=2, estimate=0.5) == "max_spend"
+    assert run_evals.stop_reason([ok], spent=3.9, max_spend=5.0, inflight=2, estimate=0.5) is None
+    dead = canned(fallback=True, schema_valid=False, cause="LLMError: 402 Payment Required")
+    assert run_evals.stop_reason([dead] * 3, spent=0.0, max_spend=5.0) == "same_failure"
+    assert run_evals.stop_reason([dead, dead, ok], spent=0.0, max_spend=5.0) is None
     other = canned(status="crashed", error="ValueError: x", fallback=False, schema_valid=False)
-    assert run_evals.stop_reason([bad, bad, other], spent=0.0, max_spend=5.0) is None
+    assert run_evals.stop_reason([dead, dead, other], spent=0.0, max_spend=5.0) is None
+    # successes first, then the key dies: only the last three count
+    assert run_evals.stop_reason([ok] * 7 + [dead] * 3, spent=0.0, max_spend=5.0) == "same_failure"
+    # a fallback with no readable cause is not an outage
+    unknown = canned(fallback=True, schema_valid=False)
+    assert run_evals.stop_reason([unknown] * 3, spent=0.0, max_spend=5.0) is None
+    over = canned(status="budget_exceeded", fallback=True, schema_valid=False, cause="LLMError: 402")
+    assert run_evals.stop_reason([over] * 3, spent=0.0, max_spend=5.0) is None
+
+
+def test_three_identical_budget_exceeded_debates_do_not_stop(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAX_TOKENS_PER_DEBATE", "500")
+    get_settings.cache_clear()
+    out = tmp_path / "r.json"
+    assert run_evals.main(["--limit", "5", "--concurrency", "1", "--out", str(out)]) == 0
+    data = json.loads(out.read_text())
+    assert [r["status"] for r in data["results"]] == ["budget_exceeded"] * 5
+    assert data["meta"]["stop_reason"] is None and data["meta"]["status"] == "complete"
+
+
+def test_mid_run_outage_after_successes_stops(tmp_path, monkeypatch):
+    calls = []
+    real = run_evals.run_one
+
+    async def dying(item):
+        calls.append(item["id"])
+        if len(calls) == 5:  # the key dies at the fifth debate
+            llm.set_gateway(DeadGateway())
+        return await real(item)
+
+    monkeypatch.setattr(run_evals, "run_one", dying)
+    out = tmp_path / "r.json"
+    assert run_evals.main(["--concurrency", "1", "--out", str(out)]) == 1
+    data = json.loads(out.read_text())
+    assert data["meta"]["stop_reason"] == "same_failure"
+    assert len(data["results"]) == 4 + run_evals.FAIL_STREAK
+    assert all(r["schema_valid"] for r in data["results"][:4])
+    assert "402" in data["results"][-1]["cause"]
+
+
+class CostlyGateway:
+    """The fake gateway, billing a fixed cost per call and yielding so debates overlap."""
+
+    def __init__(self):
+        from app.fake_llm import FakeGateway
+
+        self._gw = FakeGateway(usage_per_call=(10, 10, 0.01), delay_s=0.0005)
+
+    def stream_text(self, *a, **k):
+        return self._gw.stream_text(*a, **k)
+
+    async def structured(self, *a, **k):
+        return await self._gw.structured(*a, **k)
+
+
+def test_concurrency_cannot_overshoot_max_spend(tmp_path):
+    llm.set_gateway(CostlyGateway())
+    out = tmp_path / "r.json"
+    cap = 1.0
+    assert run_evals.main(["--concurrency", "3", "--max-spend", str(cap), "--out", str(out)]) == 0
+    data = json.loads(out.read_text())
+    costs = [r["cost_usd"] for r in data["results"]]
+    assert costs and min(costs) > 0
+    assert data["meta"]["stop_reason"] == "max_spend" and len(costs) < 20
+    # the bound: a ceiling plus at most one debate's cost
+    assert sum(costs) <= cap + max(costs)
 
 
 def test_max_spend_stops_cleanly(tmp_path):

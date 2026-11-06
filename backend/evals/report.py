@@ -109,6 +109,7 @@ def format_report(s: dict[str, Any]) -> str:
         f"crashed:                 {s['crashed_count']}",
         f"schema-valid rate:       {_pct(s['schema_valid_rate'])}  (real verdicts only)",
         f"latency p50 / p95:       {_num(s['latency_p50_s'], '.1f')}s / {_num(s['latency_p95_s'], '.1f')}s",
+        "                         (includes fallback and budget_exceeded debates; inflated when concurrency > 1)",
         f"tokens total / mean:     {s['tokens_total']} / {_num(s['tokens_mean'], '.0f')}",
         f"cost total / mean:       ${s['cost_total_usd']:.4f} / ${_num(s['cost_mean_usd'], '.4f')}",
         f"repetition rate:         {_pct(s['repetition_rate'])}  (turns regenerated for repeating a point)",
