@@ -170,3 +170,11 @@ def test_fallback_recommendation_tracks_scores(score, rec):
     v = fallback_verdict(state)
     assert v.recommendation == rec
     assert check_consistency(v) == []
+
+
+def test_prompt_states_exact_counts():
+    from app.agents.moderator import verdict_prompt
+
+    system, _ = verdict_prompt({"pitch": "x"})
+    assert "exactly five" in system
+    assert "exactly three" in system
