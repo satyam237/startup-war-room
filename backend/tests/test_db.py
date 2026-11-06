@@ -5,6 +5,14 @@ from app import db
 from app.models import FinalPosition, ScoreItem, Verdict
 
 
+def test_engine_kwargs_require_ssl_for_remote_postgres_only():
+    assert db._engine_kwargs("postgresql+asyncpg://u:p@host.example.com/d") == {
+        "connect_args": {"ssl": "require"}
+    }
+    assert db._engine_kwargs("postgresql+asyncpg://u:p@localhost/d") == {}
+    assert db._engine_kwargs("sqlite+aiosqlite:///./x.db") == {}
+
+
 def _verdict() -> Verdict:
     item = {"score": 7, "why": "because"}
     return Verdict(

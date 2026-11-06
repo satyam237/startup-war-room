@@ -2,6 +2,7 @@ import hashlib
 from typing import Any
 
 from sqlalchemy import delete, event, select, update
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
@@ -11,12 +12,20 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+def _engine_kwargs(url: str) -> dict[str, Any]:
+    """Heroku Postgres requires TLS. asyncpg takes `ssl` as a connect arg, not `sslmode`."""
+    parsed = make_url(url)
+    if parsed.drivername.startswith("postgresql") and parsed.host not in (None, "localhost", "127.0.0.1"):
+        return {"connect_args": {"ssl": "require"}}
+    return {}
+
+
 def _get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     """Engine is built lazily from the current DATABASE_URL (tests swap it)."""
     global _engine, _sessionmaker
     if _sessionmaker is None:
         url = get_settings().DATABASE_URL
-        _engine = create_async_engine(url)
+        _engine = create_async_engine(url, **_engine_kwargs(url))
         if url.startswith("sqlite"):
 
             @event.listens_for(_engine.sync_engine, "connect")
