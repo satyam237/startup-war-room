@@ -306,6 +306,39 @@ Implementers load the `frontend-design` skill. The product should feel like a te
 - [ ] **Step 2:** Run `npx playwright test`. Expected: PASS. Fix the owning code for any failure and keep the fix in this task.
 - [ ] **Step 3:** Commit `test(e2e): browser flows against fake provider`.
 
+### Task 16: Arena motion and visual identity — model: Sonnet 5.5
+
+The owner wants the product to feel vibrant, competitive, and alive: motion graphics, animation, interactive text, bright colour, and themes. The current UI is restrained and has almost no motion. This task sets the product's visual identity across all three pages. Run it before Task 12.
+
+**Concept:** a live fight night for ideas. The debate is a contest with four challengers and a referee, and the founder's idea is in the ring.
+
+**Files:**
+- Create: `frontend/src/lib/theme.ts`, `frontend/src/components/ThemeSwitcher.tsx`, `frontend/src/components/motion/*`, `frontend/src/dev/demoDebate.ts`
+- Modify: `frontend/src/index.css`, `frontend/src/pages/{Pitch,DebateRoom,Verdict}.tsx`, the components under `frontend/src/components/`
+- Test: `frontend/src/lib/theme.test.ts`, updates to existing page tests
+
+**Required experiences:**
+- Pitch: animated arena hero with kinetic headline text that reacts to the pointer, the five agents as vivid fighter cards with hover reactions, and a start button with real anticipation.
+- Debate Room: a versus intro when the debate begins, a slam-in "ROUND N" title between rounds, the active fighter's card energised while speaking, turn cards that land with impact, a referee bell at each checkpoint, a round and turn progress meter, and a countdown on the founder's rebuttal that visibly builds pressure.
+- Verdict: a staged reveal: scores count up, the radar draws in, GO / PIVOT / NO-GO lands as a stamp, then risks and experiments cascade in.
+- Interactive text: agent names, scores, and risks respond to hover and focus, and a risk highlights the agent that raised it.
+- Themes: at least three vivid, switchable themes built on CSS variables, including one light theme, persisted in `localStorage`.
+
+**Rules:**
+- Display only real data. Never invent live scores or a winner during the debate. Scores appear only once Round 3 or the verdict supplies them.
+- Streaming text must stay readable: animate a turn's arrival, never each token.
+- Honour `prefers-reduced-motion` with a calm equivalent. Keep AA contrast in every theme and all layouts at 375px.
+- Animate only `transform` and `opacity` where possible. Keep Pitch free of heavy dependencies: lazy-load the Verdict route so Recharts leaves first paint.
+- Existing behaviour and tests keep working. Print output stays readable, with controls hidden and dark radar colours.
+
+- [ ] **Step 1:** Write failing tests: theme persists and applies; invalid stored theme falls back; reduced motion skips staged delays; the Verdict page reaches its final state under reduced motion.
+- [ ] **Step 2:** Run `npm test -- --run`. Expected: FAIL.
+- [ ] **Step 3:** Add a dev-only `/?demo=1` scripted debate through `demoDebate.ts`, so every animation can be viewed with no backend. It must not ship in production paths.
+- [ ] **Step 4:** Implement the experiences, using the Motion library for React, verified through Context7.
+- [ ] **Step 5:** Run the app and capture screenshots of each page, each theme, and the mobile width with `chrome-devtools-axi`. Look at them and fix what is off.
+- [ ] **Step 6:** Run tests and `npm run build`. Expected: PASS, with no bundle warning for first paint.
+- [ ] **Step 7:** Commit `feat(web): arena motion, themes, and visual identity`.
+
 ---
 
 ## Phase 6: Evals
