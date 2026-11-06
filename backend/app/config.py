@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     MAX_TURNS: int = 14
     MAX_TOKENS_PER_DEBATE: int = 40000
     RATE_LIMIT_PER_HOUR: int = 5
+    INTAKE_RATE_LIMIT_PER_HOUR: int = 20
     REBUTTAL_TIMEOUT_S: float = 45
     DEBATE_TIMEOUT_S: int = 240
     MAX_CONCURRENT_DEBATES: int = 10

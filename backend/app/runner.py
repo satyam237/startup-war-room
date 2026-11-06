@@ -59,6 +59,13 @@ class DebateRunner:
     def at_capacity(self) -> bool:
         return self.active_count() >= get_settings().MAX_CONCURRENT_DEBATES
 
+    def is_running(self, debate_id: str) -> bool:
+        return debate_id in self._runs
+
+    def evict_log(self, debate_id: str) -> None:
+        """Drop a finished debate's log now, so it stops serving after a delete."""
+        self._logs.pop(debate_id, None)
+
     def log(self, debate_id: str) -> EventLog | None:
         return self._logs.get(debate_id)
 

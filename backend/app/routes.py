@@ -1,19 +1,21 @@
 """HTTP routes for a debate: create it, watch it, answer it, read it back."""
 
 import asyncio
+import hmac
 import json
 import logging
 import secrets
 from collections.abc import AsyncIterator, Iterable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from app import db
 from app.events import Event
+from app.export import render_markdown
 from app.guards import IntakeResult, intake
 from app.llm import Usage, get_gateway
 from app.runner import FAILED_MESSAGE, DebateRunner, RebuttalNotOpen, RunnerFull
@@ -30,6 +32,8 @@ PING_S = 15
 INTAKE_TIMEOUT_S = 20
 CLIENT_CLOSED_REQUEST = 499
 AT_CAPACITY = "The war room is at capacity. Try again in a minute."
+TOO_MANY = "Too many requests from this address. Try again later."
+MAX_COMMENT_CHARS = 2000
 # `GET /debates/{id}` is public by unguessable id, so it lists what it returns. The delete
 # token hash and feedback in `db.get_debate` stay out.
 PUBLIC_DEBATE_FIELDS = ("id", "created_at", "status", "pitch", "pitch_meta", "rebuttal", "verdict", "turns")
@@ -49,6 +53,11 @@ class Rebuttal(BaseModel):
     text: str | None = None
 
 
+class Feedback(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=MAX_COMMENT_CHARS)
+
+
 def _runner(request: Request) -> DebateRunner:
     return request.app.state.runner
 
@@ -61,6 +70,13 @@ async def create_debate(body: CreateDebate, request: Request) -> dict[str, str] 
     runner = _runner(request)
     if runner.at_capacity():  # before intake, so a refused request spends nothing
         raise HTTPException(503, AT_CAPACITY)
+
+    ip = request.client.host if request.client else "unknown"
+    create_limiter, intake_limiter = request.app.state.create_limiter, request.app.state.intake_limiter
+    for limiter in (create_limiter, intake_limiter):  # read-only, and before any paid call
+        if not limiter.allowed(ip):
+            raise HTTPException(429, TOO_MANY, headers={"Retry-After": str(limiter.retry_after_s(ip))})
+    intake_limiter.record(ip)  # every intake call costs money, so thin and refused pitches count here
 
     meta = body.model_dump(include={"target_user", "pricing", "stage"}, exclude_none=True)
     spent: list[Usage] = []
@@ -86,6 +102,7 @@ async def create_debate(body: CreateDebate, request: Request) -> dict[str, str] 
     except RunnerFull:  # other requests took the last slot during the awaits above
         await db.delete_debate(debate_id)
         raise HTTPException(503, AT_CAPACITY) from None
+    create_limiter.record(ip)  # only a started debate uses the per-IP debate quota
     return {"debate_id": debate_id, "delete_token": delete_token}
 
 
@@ -95,6 +112,49 @@ async def get_debate(debate_id: str) -> dict[str, Any]:
     if debate is None:
         raise HTTPException(404, "Debate not found.")
     return {name: debate[name] for name in PUBLIC_DEBATE_FIELDS}
+
+
+@router.get("/debates/{debate_id}/export")
+async def export_debate(debate_id: str, format: Annotated[str, Query(pattern="^md$")] = "md") -> Response:
+    debate = await db.get_debate(debate_id)
+    if debate is None:
+        raise HTTPException(404, "Debate not found.")
+    if debate["status"] == "running" or debate["verdict"] is None:
+        raise HTTPException(409, "This debate has no finished report to export.")
+    return Response(
+        render_markdown(debate),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="war-room-{debate_id}.md"'},
+    )
+
+
+@router.post("/debates/{debate_id}/feedback", status_code=201)
+async def post_feedback(debate_id: str, body: Feedback) -> dict[str, str]:
+    if await db.get_debate(debate_id) is None:
+        raise HTTPException(404, "Debate not found.")
+    await db.add_feedback(debate_id, body.rating, body.comment)
+    return {"status": "recorded"}
+
+
+@router.delete("/debates/{debate_id}", status_code=204)
+async def delete_debate(
+    debate_id: str,
+    request: Request,
+    delete_token: Annotated[str | None, Header(alias="X-Delete-Token")] = None,
+) -> Response:
+    debate = await db.get_debate(debate_id)
+    if debate is None:
+        raise HTTPException(404, "Debate not found.")
+    stored_hash = debate["delete_token_hash"]
+    # Check the token before anything else, so a wrong token learns nothing about the state.
+    if not delete_token or not stored_hash or not hmac.compare_digest(db.hash_token(delete_token), stored_hash):
+        raise HTTPException(403, "Invalid delete token.")
+    runner = _runner(request)
+    if debate["status"] == "running" or runner.is_running(debate_id):
+        raise HTTPException(409, "This debate is still running. Delete it once it has finished.")
+    await db.delete_debate(debate_id)
+    runner.evict_log(debate_id)
+    return Response(status_code=204)
 
 
 @router.post("/debates/{debate_id}/rebuttal")
