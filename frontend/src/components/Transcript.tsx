@@ -46,6 +46,8 @@ export default function Transcript({ state }: { state: DebateState }) {
         ))}
         {state.order.map((id) => {
           const t = state.turns[id]
+          // A turn reset and then failed ends with no text; the failure note below says why.
+          if (t.status === 'done' && !t.text.trim()) return null
           return (
             <article key={id} data-agent={t.agent} className="border-l-4 border-(--agent) pl-4">
               <h3 className="font-display text-sm font-bold text-(--agent)">
@@ -69,7 +71,7 @@ export default function Transcript({ state }: { state: DebateState }) {
             <p className="font-display text-sm font-bold text-(--agent)">Moderator, end of round {c.round}</p>
             <p className="mt-1 font-body leading-relaxed">{c.summary}</p>
             <ul className="mt-2 list-disc pl-5 text-sm text-muted">
-              {c.top_disagreements.map((d) => <li key={d}>{d}</li>)}
+              {c.top_disagreements.map((d, i) => <li key={i}>{d}</li>)}
             </ul>
           </div>
         ))}

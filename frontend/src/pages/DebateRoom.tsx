@@ -13,6 +13,7 @@ const MAX_TURNS = 14
 const FINISHED = ['complete', 'budget_exceeded']
 const LEFT: AgentId[] = ['vc', 'customer']
 const RIGHT: AgentId[] = ['cto', 'competitor']
+const LOST_MESSAGE = 'The connection to this debate was lost, and it did not finish. Start a new debate to try again.'
 
 export default function DebateRoom() {
   const { id = '' } = useParams()
@@ -20,6 +21,7 @@ export default function DebateRoom() {
   const [state, dispatch] = useReducer(debateReducer, initialDebateState)
   const [dismissed, setDismissed] = useState<object | null>(null)
   const [lateNote, setLateNote] = useState<string | null>(null)
+  const [lost, setLost] = useState<string | null>(null)
 
   // An already-finished debate has nothing to watch: go straight to the verdict.
   useEffect(() => {
@@ -32,7 +34,22 @@ export default function DebateRoom() {
     return () => { live = false }
   }, [id, navigate])
 
-  useEffect(() => connectDebate(id, dispatch), [id])
+  // The browser gave up on the stream (e.g. a 503 while the server restarts). Ask the server what
+  // became of the debate: a finished one goes to its verdict, anything else is a dead end.
+  useEffect(() => {
+    let live = true
+    const lose = () => { if (live) setLost(LOST_MESSAGE) }
+    const close = connectDebate(id, dispatch, () => {
+      getDebate(id)
+        .then((d) => {
+          if (!live) return
+          if (d.verdict || FINISHED.includes(String(d.status))) navigate(`/d/${id}/verdict`, { replace: true })
+          else lose()
+        })
+        .catch(lose)
+    })
+    return () => { live = false; close() }
+  }, [id, navigate])
 
   useEffect(() => {
     if (FINISHED.includes(state.status)) navigate(`/d/${id}/verdict`, { replace: true })
@@ -44,7 +61,7 @@ export default function DebateRoom() {
   const progress = Math.min(1, (turns.filter((t) => t.status === 'done').length + state.checkpoints.length) / MAX_TURNS)
 
   const ended = state.status !== 'connecting' && state.status !== 'running'
-  const stopped = state.error?.recoverable === false || (ended && !FINISHED.includes(state.status))
+  const stopped = lost !== null || state.error?.recoverable === false || (ended && !FINISHED.includes(state.status))
   const showRebuttal = state.awaitingRebuttal !== null && state.awaitingRebuttal !== dismissed && !stopped
 
   const seat = (agent: AgentId) => (
@@ -67,7 +84,7 @@ export default function DebateRoom() {
       {stopped && (
         <div role="alert" className="border-l-4 border-competitor bg-panel px-4 py-3">
           <p className="font-body">
-            {state.error?.message ?? 'This debate ended before it reached a verdict.'}
+            {lost ?? state.error?.message ?? 'This debate ended before it reached a verdict.'}
           </p>
           <Link to="/" className="mt-2 inline-block font-bold underline underline-offset-4">Start a new debate</Link>
         </div>
