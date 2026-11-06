@@ -14,10 +14,12 @@ from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from app import db
+from app.config import get_settings
 from app.events import Event
 from app.export import render_markdown
 from app.guards import IntakeResult, intake
 from app.llm import Usage, get_gateway
+from app.ratelimit import client_ip
 from app.runner import FAILED_MESSAGE, DebateRunner, RebuttalNotOpen, RunnerFull
 
 logger = logging.getLogger("app.routes")
@@ -71,7 +73,7 @@ async def create_debate(body: CreateDebate, request: Request) -> dict[str, str] 
     if runner.at_capacity():  # before intake, so a refused request spends nothing
         raise HTTPException(503, AT_CAPACITY)
 
-    ip = request.client.host if request.client else "unknown"
+    ip = client_ip(request, get_settings().TRUSTED_PROXY_HOPS)
     create_limiter, intake_limiter = request.app.state.create_limiter, request.app.state.intake_limiter
     for limiter in (create_limiter, intake_limiter):  # read-only, and before any paid call
         if not limiter.allowed(ip):
@@ -115,7 +117,7 @@ async def get_debate(debate_id: str) -> dict[str, Any]:
 
 
 @router.get("/debates/{debate_id}/export")
-async def export_debate(debate_id: str, format: Annotated[str, Query(pattern="^md$")] = "md") -> Response:
+async def export_debate(debate_id: str, fmt: Annotated[str, Query(alias="format", pattern="^md$")] = "md") -> Response:
     debate = await db.get_debate(debate_id)
     if debate is None:
         raise HTTPException(404, "Debate not found.")
@@ -129,9 +131,18 @@ async def export_debate(debate_id: str, format: Annotated[str, Query(pattern="^m
 
 
 @router.post("/debates/{debate_id}/feedback", status_code=201)
-async def post_feedback(debate_id: str, body: Feedback) -> dict[str, str]:
-    if await db.get_debate(debate_id) is None:
+async def post_feedback(debate_id: str, body: Feedback, request: Request) -> dict[str, str]:
+    limiter = request.app.state.feedback_limiter
+    ip = client_ip(request, get_settings().TRUSTED_PROXY_HOPS)
+    if not limiter.check(ip):
+        raise HTTPException(429, TOO_MANY, headers={"Retry-After": str(limiter.retry_after_s(ip))})
+    debate = await db.get_debate(debate_id)
+    if debate is None:
         raise HTTPException(404, "Debate not found.")
+    if debate["status"] == "running":
+        raise HTTPException(409, "Rate this debate once it has finished.")
+    if debate["feedback"]:
+        raise HTTPException(409, "This debate already has a rating.")
     await db.add_feedback(debate_id, body.rating, body.comment)
     return {"status": "recorded"}
 

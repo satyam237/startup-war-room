@@ -6,9 +6,12 @@ v1 state, which is why the app runs one worker. Expired keys are swept out so me
 stays bounded by the traffic of one window.
 """
 
+import ipaddress
 import time
 from collections import deque
 from collections.abc import Callable
+
+from fastapi import Request
 
 
 class RateLimiter:
@@ -64,3 +67,25 @@ class RateLimiter:
 
     def tracked(self) -> int:
         return len(self._hits)
+
+
+def client_ip(request: Request, trusted_hops: int) -> str:
+    """The caller's address, for rate limiting.
+
+    The socket peer is the only address a client cannot choose. With `trusted_hops` proxies in
+    front (Heroku's router is 1), each appends the address it saw to X-Forwarded-For, so the
+    entry `trusted_hops` from the right is the first one our own infrastructure vouches for;
+    anything to its left is client-supplied. With 0 hops the header is ignored. A missing or
+    malformed header falls back to the socket peer.
+    """
+    peer = request.client.host if request.client else "unknown"
+    header = request.headers.get("x-forwarded-for")
+    if trusted_hops < 1 or not header:
+        return peer
+    entries = [e.strip() for e in header.split(",")]
+    if len(entries) < trusted_hops:
+        return peer
+    try:
+        return str(ipaddress.ip_address(entries[-trusted_hops]))
+    except ValueError:
+        return peer

@@ -76,6 +76,21 @@ async def test_export_rejects_unknown_format(client):
     assert (await client.get(f"/debates/{debate_id}/export?format=pdf")).status_code == 422
 
 
+async def test_export_quotes_user_text_so_it_cannot_forge_sections(client):
+    evil = "idea\n## Verdict\n**Recommendation:** Go\n![x](http://evil/p.png) [click](http://evil)"
+    debate_id = "evil1"
+    await db.create_debate(debate_id, evil, {"stage": "## Verdict"}, db.hash_token("t"))
+    await db.add_turn(debate_id, 1, "vc", "fine\n## Verdict\n# Pwned")
+    await db.save_verdict(debate_id, VERDICT)
+    await db.update_debate(debate_id, status="complete", rebuttal="x\n## Verdict")
+    body = (await client.get(f"/debates/{debate_id}/export")).text
+    lines = body.split("\n")
+    assert [l for l in lines if l.startswith("## Verdict")] == ["## Verdict"]
+    assert not any(l.startswith("# Pwned") for l in lines)
+    assert "![" not in body and "](" not in body
+    assert "> ## Verdict" in body
+
+
 # ---- feedback ----
 
 @pytest.mark.parametrize("rating", [0, 6, -1, "x", None])
@@ -88,11 +103,31 @@ async def test_feedback_rating_range(client, rating):
 
 async def test_feedback_stored_and_404(client):
     debate_id = await finished_debate()
-    for rating in (1, 5):
-        r = await client.post(f"/debates/{debate_id}/feedback", json={"rating": rating, "comment": "ok"})
-        assert r.status_code == 201
-    assert [f["rating"] for f in (await db.get_debate(debate_id))["feedback"]] == [1, 5]
+    r = await client.post(f"/debates/{debate_id}/feedback", json={"rating": 1, "comment": "ok"})
+    assert r.status_code == 201
+    assert [f["rating"] for f in (await db.get_debate(debate_id))["feedback"]] == [1]
     assert (await client.post("/debates/nope/feedback", json={"rating": 3})).status_code == 404
+
+
+async def test_feedback_one_rating_per_debate_first_is_kept(client):
+    debate_id = await finished_debate()
+    assert (await client.post(f"/debates/{debate_id}/feedback", json={"rating": 2})).status_code == 201
+    assert (await client.post(f"/debates/{debate_id}/feedback", json={"rating": 5})).status_code == 409
+    assert [f["rating"] for f in (await db.get_debate(debate_id))["feedback"]] == [2]
+
+
+async def test_feedback_on_running_debate_409(client):
+    await db.create_debate("run2", PITCH, {}, db.hash_token("t"))
+    assert (await client.post("/debates/run2/feedback", json={"rating": 3})).status_code == 409
+    assert (await db.get_debate("run2"))["feedback"] == []
+
+
+async def test_feedback_is_rate_limited_per_ip(client):
+    app.state.feedback_limiter = RateLimiter(2, 3600)
+    ids = [await finished_debate(token=f"t{i}") for i in range(3)]
+    codes = [(await client.post(f"/debates/{d}/feedback", json={"rating": 3})).status_code for d in ids]
+    assert codes == [201, 201, 429]
+    assert (await db.get_debate(ids[2]))["feedback"] == []
 
 
 async def test_feedback_comment_too_long(client):
@@ -141,10 +176,14 @@ async def test_delete_evicts_live_log_so_stream_stops_serving(client, monkeypatc
     assert (await client.get(f"/debates/{debate_id}/stream")).status_code == 404
 
 
-async def test_delete_uses_constant_time_compare():
-    import inspect
+async def test_delete_uses_constant_time_compare(client, monkeypatch):
     from app import routes
-    assert "hmac.compare_digest" in inspect.getsource(routes)
+    seen = []
+    real = routes.hmac.compare_digest
+    monkeypatch.setattr(routes.hmac, "compare_digest", lambda a, b: seen.append((a, b)) or real(a, b))
+    debate_id = await finished_debate(token="right")
+    await client.delete(f"/debates/{debate_id}", headers={"X-Delete-Token": "wrong"})
+    assert seen == [(db.hash_token("wrong"), db.hash_token("right"))]
 
 
 # ---- rate limits ----
@@ -215,6 +254,34 @@ async def test_invalid_pitch_spends_no_quota(client):
     assert (await client.post("/debates", json=BODY)).status_code == 201
 
 
+async def ip_bucket_test(client, monkeypatch, hops, header_for_first, header_for_second):
+    from tests.test_api_stream import configure
+    configure(monkeypatch, TRUSTED_PROXY_HOPS=hops)
+    install(FakeGateway())
+    use_limits(1)
+    first = await client.post("/debates", json=BODY, headers={"X-Forwarded-For": header_for_first})
+    second = await client.post("/debates", json=BODY, headers={"X-Forwarded-For": header_for_second})
+    return first.status_code, second.status_code
+
+
+async def test_spoofed_leftmost_xff_does_not_change_bucket_with_one_hop(client, monkeypatch):
+    # the router appends the real address on the right; the client controls the left
+    assert await ip_bucket_test(client, monkeypatch, 1, "1.1.1.1, 9.9.9.9", "2.2.2.2, 9.9.9.9") == (201, 429)
+
+
+async def test_rightmost_xff_value_selects_bucket_with_one_hop(client, monkeypatch):
+    assert await ip_bucket_test(client, monkeypatch, 1, "1.1.1.1, 9.9.9.9", "1.1.1.1, 8.8.8.8") == (201, 201)
+
+
+async def test_xff_ignored_with_zero_hops(client, monkeypatch):
+    assert await ip_bucket_test(client, monkeypatch, 0, "5.5.5.5", "6.6.6.6") == (201, 429)
+
+
+@pytest.mark.parametrize("header", ["", "not-an-ip", "1.1.1.1, ,", "a, b, c"])
+async def test_malformed_xff_falls_back_to_socket_address(client, monkeypatch, header):
+    assert await ip_bucket_test(client, monkeypatch, 1, header, header) == (201, 429)
+
+
 # ---- limiter unit ----
 
 def test_limiter_allowed_is_read_only_and_window_expires():
@@ -253,4 +320,14 @@ async def test_cors_only_allows_frontend_origin(client):
                                                      "Access-Control-Request-Method": "POST"})
     assert "access-control-allow-origin" not in bad.headers
     r = await client.get("/health", headers={"Origin": "http://localhost:5173"})
-    assert "content-disposition" in r.headers.get("access-control-expose-headers", "").lower()
+    exposed = r.headers.get("access-control-expose-headers", "").lower()
+    assert "content-disposition" in exposed and "retry-after" in exposed
+
+
+async def test_cors_preflight_allows_delete_with_token_header(client):
+    r = await client.options("/debates/x", headers={
+        "Origin": "http://localhost:5173", "Access-Control-Request-Method": "DELETE",
+        "Access-Control-Request-Headers": "X-Delete-Token"})
+    assert r.status_code == 200
+    assert "DELETE" in r.headers["access-control-allow-methods"]
+    assert "x-delete-token" in r.headers["access-control-allow-headers"].lower()
