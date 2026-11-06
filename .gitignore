@@ -25,3 +25,6 @@ dist/
 frontend/test-results/
 frontend/playwright-report/
 .vercel/
+
+# uv temp locks
+uv-*.lock
