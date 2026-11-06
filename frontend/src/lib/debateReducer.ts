@@ -12,6 +12,9 @@ export interface Scorecard {
 }
 export interface Risk { rank: number; risk: string; severity: 'high' | 'med' | 'low'; raised_by: string }
 export interface Experiment { test: string; timebox_days: number; success_criteria: string; kill_criteria: string }
+/** Mirrors backend/app/models.py `FinalPosition`. */
+export interface FinalPosition { score_1_to_10: number; top_risk: string; change_mind_if: string }
+
 /** Mirrors backend/app/models.py `Verdict`. */
 export interface Verdict {
   recommendation: 'go' | 'pivot' | 'no_go'
@@ -31,7 +34,7 @@ export type DebateAction = { seq?: number } & (
   | { type: 'turn_start'; data: { turn_id: string; agent: AgentId; round: number; attempt: number } }
   | { type: 'turn_token'; data: { turn_id: string; text: string } }
   | { type: 'turn_reset'; data: { turn_id: string; reason: string } }
-  | { type: 'turn_end'; data: { turn_id: string; agent: AgentId; round: number; text: string; final_position?: string } }
+  | { type: 'turn_end'; data: { turn_id: string; agent: AgentId; round: number; text: string; final_position?: FinalPosition } }
   | { type: 'turn_failed'; data: { agent: AgentId; round: number; note: string } }
   | { type: 'checkpoint'; data: { round: number; summary: string; top_disagreements: [string, string] } }
   | { type: 'await_rebuttal'; data: { timeout_s: number } }
@@ -50,7 +53,7 @@ export interface Turn {
   attempt: number
   text: string
   status: 'streaming' | 'done'
-  finalPosition?: string
+  finalPosition?: FinalPosition
 }
 
 export interface DebateState {
@@ -132,8 +135,18 @@ export function debateReducer(state: DebateState, action: DebateAction): DebateS
         order: state.turns[turn_id] ? state.order : [...state.order, turn_id],
       }
     }
-    case 'turn_failed':
-      return { ...state, failures: [...state.failures, action.data] }
+    case 'turn_failed': {
+      // turn_failed has no turn_id: close the latest streaming turn of that agent and round, if any.
+      // A failure with no turn_start (e.g. the moderator) just records the note.
+      const { agent, round } = action.data
+      const open = [...state.order].reverse().map((id) => state.turns[id])
+        .find((t) => t.agent === agent && t.round === round && t.status === 'streaming')
+      return {
+        ...state,
+        turns: open ? { ...state.turns, [open.id]: { ...open, status: 'done' } } : state.turns,
+        failures: [...state.failures, action.data],
+      }
+    }
     case 'checkpoint':
       return { ...state, checkpoints: [...state.checkpoints, action.data] }
     case 'await_rebuttal':
