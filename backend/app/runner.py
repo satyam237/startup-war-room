@@ -38,6 +38,12 @@ class _Run:
     log: EventLog
     task: asyncio.Task[None] | None = None
     answer: asyncio.Future[str | None] | None = None  # set only while a window is open
+    tokens_used: int = 0
+    cost_usd: float = 0.0
+
+    def add(self, usage: Usage) -> None:
+        self.tokens_used += usage.tokens_in + usage.tokens_out
+        self.cost_usd += usage.cost_usd
 
 
 class DebateRunner:
@@ -63,9 +69,11 @@ class DebateRunner:
         if self.at_capacity():
             raise RunnerFull
         run = _Run(log=EventLog())
+        for usage in spent or ():
+            run.add(usage)
         self._logs[debate_id] = run.log
         self._runs[debate_id] = run
-        run.task = asyncio.create_task(self._run(debate_id, run, pitch, meta, spent or []))
+        run.task = asyncio.create_task(self._run(debate_id, run, pitch, meta))
 
     def submit_rebuttal(self, debate_id: str, text: str | None) -> None:
         run = self._runs.get(debate_id)
@@ -85,33 +93,29 @@ class DebateRunner:
             handle.cancel()
         self._evictions.clear()
 
-    async def _run(
-        self, debate_id: str, run: _Run, pitch: str, meta: dict[str, Any] | None, spent: list[Usage]
-    ) -> None:
+    async def _run(self, debate_id: str, run: _Run, pitch: str, meta: dict[str, Any] | None) -> None:
         try:
-            await self._drive(debate_id, run, pitch, meta, spent)
+            await self._drive(debate_id, run, pitch, meta)
         except asyncio.CancelledError:
             logger.warning("debate stopped by shutdown id=%s", debate_id)
-            await self._fail(debate_id, run.log)
+            await self._fail(debate_id, run)
         except Exception:
             logger.exception("debate crashed id=%s", debate_id)
-            await self._fail(debate_id, run.log)
+            await self._fail(debate_id, run)
         finally:
             run.log.close()
             del self._runs[debate_id]
             self._schedule_eviction(debate_id)
 
-    async def _drive(
-        self, debate_id: str, run: _Run, pitch: str, meta: dict[str, Any] | None, spent: list[Usage]
-    ) -> None:
+    async def _drive(self, debate_id: str, run: _Run, pitch: str, meta: dict[str, Any] | None) -> None:
         settings = get_settings()
-        deps = Deps(gw=get_gateway(), log=run.log, settings=settings, store=db)
+        deps = Deps(gw=get_gateway(), log=run.log, settings=settings, store=db, on_usage=run.add)
         graph = build_graph(deps, InMemorySaver())
         config = {"configurable": {"thread_id": debate_id}}
 
         state = initial_state(debate_id, pitch, meta, settings)
-        state["budget"]["tokens_used"] = sum(u.tokens_in + u.tokens_out for u in spent)
-        state["budget"]["cost_usd"] = sum(u.cost_usd for u in spent)
+        state["budget"]["tokens_used"] = run.tokens_used
+        state["budget"]["cost_usd"] = run.cost_usd
 
         result = await graph.ainvoke(state, config)
         while (payload := pending_rebuttal(result)) is not None:
@@ -128,13 +132,18 @@ class DebateRunner:
         run.answer = None
         return answer.result() if answer.done() else None
 
-    async def _fail(self, debate_id: str, log: EventLog) -> None:
+    async def _fail(self, debate_id: str, run: _Run) -> None:
+        last = run.log.last_event
+        if last is not None and last.event == "done":  # `report` finished; that outcome stands
+            return
         try:
-            await db.update_debate(debate_id, status="failed")
+            await db.update_debate(
+                debate_id, status="failed", total_tokens=run.tokens_used, est_cost=run.cost_usd
+            )
         except Exception:  # whatever broke the debate may have broken this too; readers still need an end
             logger.exception("could not mark debate failed id=%s", debate_id)
-        log.publish("error", {"message": FAILED_MESSAGE, "recoverable": False})
-        log.publish("done", {"status": "failed"})
+        run.log.publish("error", {"message": FAILED_MESSAGE, "recoverable": False})
+        run.log.publish("done", {"status": "failed"})
 
     def _schedule_eviction(self, debate_id: str) -> None:
         def evict() -> None:

@@ -1,30 +1,38 @@
 """HTTP routes for a debate: create it, watch it, answer it, read it back."""
 
+import asyncio
 import json
+import logging
 import secrets
 from collections.abc import AsyncIterator, Iterable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from app import db
 from app.events import Event
-from app.guards import intake
+from app.guards import IntakeResult, intake
 from app.llm import Usage, get_gateway
 from app.runner import FAILED_MESSAGE, DebateRunner, RebuttalNotOpen, RunnerFull
+
+logger = logging.getLogger("app.routes")
 
 MIN_PITCH_CHARS = 50
 MAX_PITCH_CHARS = 2000
 MAX_META_CHARS = 200
 MAX_REBUTTAL_CHARS = 500
 PING_S = 15
+# Heroku cuts a request at 30s, then the handler would start a debate nobody can see.
+# The `fast` tier alone can take 15s per attempt, with retries on top.
+INTAKE_TIMEOUT_S = 20
+CLIENT_CLOSED_REQUEST = 499
 AT_CAPACITY = "The war room is at capacity. Try again in a minute."
 # `GET /debates/{id}` is public by unguessable id, so it lists what it returns. The delete
 # token hash and feedback in `db.get_debate` stay out.
-PUBLIC_DEBATE_FIELDS = ("id", "created_at", "status", "pitch", "pitch_meta", "verdict", "turns")
+PUBLIC_DEBATE_FIELDS = ("id", "created_at", "status", "pitch", "pitch_meta", "rebuttal", "verdict", "turns")
 
 router = APIRouter()
 
@@ -46,7 +54,7 @@ def _runner(request: Request) -> DebateRunner:
 
 
 @router.post("/debates", status_code=201, response_model=None)
-async def create_debate(body: CreateDebate, request: Request) -> dict[str, str] | JSONResponse:
+async def create_debate(body: CreateDebate, request: Request) -> dict[str, str] | Response:
     pitch = body.pitch.strip()  # clarification answers are already appended by the client
     if not MIN_PITCH_CHARS <= len(pitch) <= MAX_PITCH_CHARS:
         raise HTTPException(422, f"A pitch must be {MIN_PITCH_CHARS} to {MAX_PITCH_CHARS} characters.")
@@ -56,11 +64,19 @@ async def create_debate(body: CreateDebate, request: Request) -> dict[str, str] 
 
     meta = body.model_dump(include={"target_user", "pricing", "stage"}, exclude_none=True)
     spent: list[Usage] = []
-    screened = await intake(get_gateway(), pitch, meta, on_usage=spent.append)
+    try:
+        async with asyncio.timeout(INTAKE_TIMEOUT_S):
+            screened = await intake(get_gateway(), pitch, meta, on_usage=spent.append)
+    except TimeoutError:  # fails open, like any other intake failure
+        logger.warning("intake hit its time limit, allowing the pitch")
+        screened = IntakeResult(allowed=True)
     if not screened.allowed:
         raise HTTPException(422, screened.refusal_reason)
     if screened.thin and not body.skip_clarify:
         return JSONResponse({"status": "needs_clarification", "questions": screened.questions})
+
+    if await request.is_disconnected():  # nobody would ever hold the id or the delete token
+        return Response(status_code=CLIENT_CLOSED_REQUEST)
 
     debate_id = secrets.token_urlsafe(16)
     delete_token = secrets.token_urlsafe(32)

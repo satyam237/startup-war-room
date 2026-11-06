@@ -28,6 +28,10 @@ class EventLog:
         self._changed.set()
         self._changed = asyncio.Event()
 
+    @property
+    def last_event(self) -> Event | None:
+        return self._events[-1] if self._events else None
+
     def publish(self, event: str, data: dict[str, Any]) -> int:
         if self._closed:
             raise RuntimeError(f"event log is closed; cannot publish {event!r}")

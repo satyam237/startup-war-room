@@ -140,6 +140,9 @@ class Deps:
     settings: Settings
     store: DebateStore
     clock: Callable[[], float] = time.monotonic
+    # Sees each usage as it happens. Graph state only moves at a node's end, so this is
+    # the one running total that survives a crash inside a node.
+    on_usage: Callable[[Usage], None] | None = None
 
 
 def initial_state(
@@ -204,8 +207,14 @@ def _render_position(position: FinalPosition) -> str:
 class _Meter:
     """The one accounting path. A node works on its own copy and returns it as state."""
 
-    def __init__(self, state: DebateState, clock: Callable[[], float]) -> None:
+    def __init__(
+        self,
+        state: DebateState,
+        clock: Callable[[], float],
+        on_usage: Callable[[Usage], None] | None = None,
+    ) -> None:
         self.budget = Budget(**state["budget"])
+        self._on_usage = on_usage
         self._deadline = state["deadline"]
         self._clock = clock
         self.turn_tokens_in = 0
@@ -218,6 +227,8 @@ class _Meter:
         self.budget["cost_usd"] += usage.cost_usd
         self.turn_tokens_in += usage.tokens_in
         self.turn_tokens_out += usage.tokens_out
+        if self._on_usage is not None:
+            self._on_usage(usage)
 
     def start_turn(self) -> None:
         self.budget["turns_used"] += 1
@@ -248,7 +259,7 @@ class _Debate:
         self.log = deps.log
 
     def _meter(self, state: DebateState) -> _Meter:
-        return _Meter(state, self.deps.clock)
+        return _Meter(state, self.deps.clock, self.deps.on_usage)
 
     async def setup(self, state: DebateState) -> dict[str, Any]:
         state = {**state, "deadline": self.deps.clock() + self.deps.settings.DEBATE_TIMEOUT_S}
@@ -474,6 +485,8 @@ class _Debate:
         answer = interrupt({"timeout_s": timeout_s})
         text = (answer or "").strip() or None
         self.log.publish("rebuttal_received", {"text": text})
+        if text is not None:
+            await self.deps.store.update_debate(state["debate_id"], rebuttal=text)
         return {"rebuttal": text, "status": meter.status_after(state)}
 
     async def verdict(self, state: DebateState) -> dict[str, Any]:

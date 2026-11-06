@@ -84,6 +84,7 @@ class DebateRow(Base):
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     est_cost: Mapped[float] = mapped_column(Float, default=0.0)
     delete_token_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    rebuttal: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class TurnRow(Base):

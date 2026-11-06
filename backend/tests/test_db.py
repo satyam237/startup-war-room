@@ -78,3 +78,10 @@ async def test_turn_details_round_trip():
     turns = (await db.get_debate("d1"))["turns"]
     assert turns[0]["details"] == {"top_disagreements": ["a", "b"]}
     assert turns[1]["details"] is None
+
+
+async def test_rebuttal_round_trip():
+    await db.create_debate("d1", "p")
+    assert (await db.get_debate("d1"))["rebuttal"] is None
+    await db.update_debate("d1", rebuttal="We have ten paying teams.")
+    assert (await db.get_debate("d1"))["rebuttal"] == "We have ten paying teams."

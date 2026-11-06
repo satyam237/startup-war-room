@@ -7,17 +7,21 @@ httpx's ASGITransport buffers a whole response, which suits a stream that runs t
 import asyncio
 import hashlib
 import json
+import time
 from collections.abc import Callable
 from typing import Any
 
 import pytest
 from sqlalchemy import func, select
 
-from app import db, llm
+from app import db, llm, routes
 from app.config import get_settings
+from app.events import EventLog
 from app.fake_llm import FakeGateway
+from app.llm import Usage
 from app.main import app
 from app.models import DebateRow, FinalPosition
+from app.runner import DebateRunner, RebuttalNotOpen, _Run
 
 PITCH = "An app that matches freelance designers with early-stage startups for fixed-price sprints."
 BODY = {"pitch": PITCH, "skip_clarify": True}
@@ -69,6 +73,7 @@ async def wait_finished(debate_id: str) -> None:
 class LiveStream:
     def __init__(self, debate_id: str, last_event_id: int | None = None) -> None:
         self.events: list[dict[str, Any]] = []
+        self.raw = ""
         self._buffer = ""
         self._gone = asyncio.Event()
         self._asked = False
@@ -91,6 +96,7 @@ class LiveStream:
     async def _send(self, message: dict[str, Any]) -> None:
         if message["type"] != "http.response.body":
             return
+        self.raw += message.get("body", b"").decode()
         self._buffer += message.get("body", b"").decode()
         *complete, self._buffer = self._buffer.replace("\r\n", "\n").split("\n\n")
         for block in complete:
@@ -548,3 +554,178 @@ async def test_shutdown_marks_running_debates_failed(client):
     assert (await db.get_debate(debate_id))["status"] == "failed"
     assert log._events[-1].event == "done" and log._closed
     assert runner().active_count() == 0
+
+
+async def test_intake_has_a_wall_clock_limit_and_fails_open(client, monkeypatch):
+    """A hung provider must not outlast the platform's 30s request limit."""
+    assert routes.INTAKE_TIMEOUT_S == 20
+    monkeypatch.setattr(routes, "INTAKE_TIMEOUT_S", 0.02)
+
+    def refuse(call):  # would refuse, if intake ever got to answer
+        if call["schema"] is not None and call["schema"].__name__ == "_IntakeVerdict":
+            return {"harmful": True, "reason": "No.", "thin": False, "questions": []}
+        return None
+
+    install(FakeGateway(refuse, delay_s=0.3))
+    started = time.monotonic()
+    r = await client.post("/debates", json=BODY)
+    assert r.status_code == 201
+    assert time.monotonic() - started < 0.25
+
+
+async def test_intake_timeout_keeps_usage_so_far(client, monkeypatch):
+    configure(monkeypatch, REBUTTAL_TIMEOUT_S=0.01, MAX_TOKENS_PER_DEBATE=100)
+    monkeypatch.setattr(routes, "INTAKE_TIMEOUT_S", 0.02)
+
+    async def slow_intake(_gw, _pitch, _meta, on_usage):
+        on_usage(Usage(model="fake/fast", tokens_in=70, tokens_out=30, cost_usd=0.25, latency_ms=0))
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(routes, "intake", slow_intake)
+    install(FakeGateway(usage_per_call=(1, 1, 0.0)))
+    debate_id = await create(client)
+    await wait_finished(debate_id)
+    stored = await db.get_debate(debate_id)
+    assert stored["status"] == "budget_exceeded"  # the budget was spent before the persona ran
+    assert stored["total_tokens"] == 102 and stored["est_cost"] == 0.25
+
+
+async def post_then_vanish(body: dict[str, Any]) -> list[dict[str, Any]]:
+    """POST through ASGI with a client that has gone by the time the handler looks."""
+    sent: list[dict[str, Any]] = []
+    messages = [{"type": "http.request", "body": json.dumps(body).encode(), "more_body": False}]
+
+    async def receive() -> dict[str, Any]:
+        return messages.pop() if messages else {"type": "http.disconnect"}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+        "scheme": "http", "path": "/debates", "raw_path": b"/debates", "query_string": b"",
+        "root_path": "", "headers": [(b"host", b"test"), (b"content-type", b"application/json")],
+        "client": ("127.0.0.1", 1), "server": ("test", 80),
+    }
+    await app(scope, receive, send)
+    return sent
+
+
+async def test_client_gone_after_intake_starts_nothing(client):
+    gateway = install(FakeGateway())
+    sent = await post_then_vanish(BODY)
+    assert sent[0]["status"] == 499
+    assert len(gateway.calls) == 1  # intake only
+    assert runner().active_count() == 0
+    async with db._get_sessionmaker()() as session:
+        assert await session.scalar(select(func.count()).select_from(DebateRow)) == 0
+
+
+async def test_shutdown_after_report_keeps_the_finished_status(client, monkeypatch):
+    async def finish_then_linger(self, debate_id, run, *_args):
+        await db.update_debate(debate_id, status="complete")
+        run.log.publish("done", {"status": "complete"})
+        await asyncio.sleep(60)  # stands in for the final checkpoint write
+
+    monkeypatch.setattr(DebateRunner, "_drive", finish_then_linger)
+    debate_id = await create(client)
+    log = runner().log(debate_id)
+    await wait_until(lambda: log.last_event is not None)
+    await runner().shutdown()
+
+    assert (await db.get_debate(debate_id))["status"] == "complete"
+    assert [e.event async for e in log.subscribe()] == ["done"]
+
+
+async def test_crash_after_report_keeps_the_finished_status(client, monkeypatch):
+    async def finish_then_crash(self, debate_id, run, *_args):
+        await db.update_debate(debate_id, status="complete")
+        run.log.publish("done", {"status": "complete"})
+        raise RuntimeError("the final checkpoint write failed")
+
+    monkeypatch.setattr(DebateRunner, "_drive", finish_then_crash)
+    debate_id = await create(client)
+    log = runner().log(debate_id)
+    await wait_finished(debate_id)
+    assert (await db.get_debate(debate_id))["status"] == "complete"
+    assert [e.event async for e in log.subscribe()] == ["done"]
+
+
+async def test_failed_debate_saves_what_it_spent(client, monkeypatch):
+    real_add_turn, written = db.add_turn, []
+
+    async def fail_on_second_turn(*args, **kwargs):
+        written.append(args)
+        if len(written) == 2:
+            raise RuntimeError("boom")
+        return await real_add_turn(*args, **kwargs)
+
+    monkeypatch.setattr(db, "add_turn", fail_on_second_turn)
+    install(FakeGateway(usage_per_call=(10, 5, 0.01)))
+    debate_id = await create(client)
+    await wait_finished(debate_id)
+    stored = await db.get_debate(debate_id)
+    assert stored["status"] == "failed"
+    # Intake, persona, turn 1, then turn 2 and its repeat check, which were still in the
+    # node that crashed: 5 calls.
+    assert stored["total_tokens"] == 75
+    assert stored["est_cost"] == pytest.approx(0.05)
+
+
+async def test_debate_stopped_by_shutdown_saves_what_it_spent(client):
+    install(FakeGateway(usage_per_call=(10, 5, 0.01)))
+    debate_id = await create(client)
+    log = runner().log(debate_id)
+    await wait_until(lambda: "await_rebuttal" in [e.event for e in log._events])
+    await runner().shutdown()
+    stored = await db.get_debate(debate_id)
+    assert stored["status"] == "failed" and stored["total_tokens"] > 0
+
+
+async def test_rebuttal_text_is_stored_and_returned(client):
+    debate_id = await create(client)
+    async with LiveStream(debate_id) as stream:
+        await stream.until("await_rebuttal")
+        await client.post(f"/debates/{debate_id}/rebuttal", json={"text": "  We have ten paying teams.  "})
+        await stream.until("done")
+    assert (await client.get(f"/debates/{debate_id}")).json()["rebuttal"] == "We have ten paying teams."
+
+
+async def test_skipped_rebuttal_is_null(client, monkeypatch):
+    debate_id = await run_to_end(client, monkeypatch)
+    body = (await client.get(f"/debates/{debate_id}")).json()
+    assert "rebuttal" in body and body["rebuttal"] is None
+
+
+async def open_window(timeout_s: float) -> tuple[DebateRunner, asyncio.Task[str | None]]:
+    debate_runner, run = DebateRunner(), _Run(log=EventLog())
+    debate_runner._runs["d"] = run
+    waiting = asyncio.create_task(debate_runner._await_rebuttal(run, {"timeout_s": timeout_s}))
+    await asyncio.sleep(0)  # the window is open
+    return debate_runner, waiting
+
+
+async def test_rebuttal_at_the_timeout_boundary_is_kept():
+    """The answer lands after the deadline passed but before the timer has been handled."""
+    debate_runner, waiting = await open_window(0.01)
+    time.sleep(0.03)  # blocks the loop on purpose, so the timer cannot fire first
+    debate_runner.submit_rebuttal("d", "just in time")
+    assert await waiting == "just in time"
+
+
+async def test_rebuttal_after_the_window_closed_is_refused():
+    debate_runner, waiting = await open_window(0.01)
+    assert await waiting is None
+    with pytest.raises(RebuttalNotOpen):
+        debate_runner.submit_rebuttal("d", "too late")
+
+
+async def test_stream_sends_keep_alive_pings(client, monkeypatch):
+    assert routes.PING_S == 15
+    monkeypatch.setattr(routes, "PING_S", 0.01)
+    debate_id = await create(client)
+    async with LiveStream(debate_id) as stream:
+        await stream.until("await_rebuttal")
+        await wait_until(lambda: ": ping" in stream.raw)
+        await client.post(f"/debates/{debate_id}/rebuttal", json={"text": ""})
+        await stream.until("done")

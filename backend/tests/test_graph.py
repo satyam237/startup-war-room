@@ -691,3 +691,25 @@ async def test_store_gets_the_fields_a_replay_needs():
         {"final_position": e["final_position"]} for e in rig.named("turn_end") if e["round"] == 3
     ]
     assert all(t["details"] is None for t in rig.store.turns if t["round"] < 3 and t["agent"] != "moderator")
+
+
+async def test_rebuttal_text_reaches_the_store():
+    rig = Rig()
+    await rig.run("  We have ten paying teams.  ")
+    assert rig.store.fields["rebuttal"] == "We have ten paying teams."
+
+
+@pytest.mark.parametrize("skipped", [None, "", "   "])
+async def test_skipped_rebuttal_writes_nothing(skipped):
+    rig = Rig()
+    await rig.run(skipped)
+    assert "rebuttal" not in rig.store.fields
+
+
+async def test_on_usage_sees_everything_the_budget_counts():
+    seen: list[Usage] = []
+    gw = FakeGateway(default_script, usage_per_call=(10, 5, 0.01))
+    rig = Rig(gw)
+    rig.deps.on_usage = seen.append
+    result = await rig.run()
+    assert sum(u.tokens_in + u.tokens_out for u in seen) == result["budget"]["tokens_used"]

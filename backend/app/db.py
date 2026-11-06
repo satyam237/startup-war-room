@@ -57,6 +57,7 @@ def _debate_dict(row: DebateRow) -> dict[str, Any]:
         "total_tokens": row.total_tokens,
         "est_cost": row.est_cost,
         "delete_token_hash": row.delete_token_hash,
+        "rebuttal": row.rebuttal,
     }
 
 
