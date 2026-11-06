@@ -62,4 +62,19 @@ describe('connectDebate', () => {
     FakeES.last.emit('error', new Event('error'))
     expect(onClosed).not.toHaveBeenCalled()
   })
+
+  it('does not call onClosed for a transport error after done, and calls it once for repeats', () => {
+    const afterDone = vi.fn()
+    connectDebate('abc', () => {}, afterDone)
+    FakeES.last.emit('done', { data: '{"status":"complete"}', lastEventId: '8' })
+    FakeES.last.emit('error', new Event('error')) // readyState is 2 because done closed it
+    expect(afterDone).not.toHaveBeenCalled()
+
+    const repeated = vi.fn()
+    connectDebate('abc', () => {}, repeated)
+    FakeES.last.readyState = 2
+    FakeES.last.emit('error', new Event('error'))
+    FakeES.last.emit('error', new Event('error'))
+    expect(repeated).toHaveBeenCalledTimes(1)
+  })
 })

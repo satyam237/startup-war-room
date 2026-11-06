@@ -36,8 +36,9 @@ test('pitch to verdict with a rebuttal', async ({ page }) => {
 
 test('no rebuttal auto-continues', async ({ page }) => {
   await startDebate(page, webUrl(SHORT_WAIT))
-  await expect(rebuttalBox(page)).toBeVisible()
-  // REBUTTAL_TIMEOUT_S=2: the room carries on without the founder and still ends in a verdict.
+  // REBUTTAL_TIMEOUT_S=2: round 2 must start well inside a 30s window. The rebuttal box is not
+  // asserted because it may already be gone by the time the page has replayed.
+  await expect(page.getByText('Round 2 of 3')).toBeVisible({ timeout: 15_000 })
   await expectVerdict(page)
 })
 
@@ -46,16 +47,15 @@ test('reload mid-debate catches up', async ({ page }) => {
   await expect(page.getByRole('log').locator('article').first()).toContainText(/\S/)
   await page.reload()
   await expect(page.getByTestId('agent-vc')).toBeVisible()
-  // The replay brings the earlier turns back, then the debate runs on to its verdict.
+  // The replay brings the earlier turns back, and the open rebuttal window with them.
   await expect(page.getByRole('log').locator('article').first()).toContainText(/\S/)
-  await rebuttalBox(page).waitFor({ timeout: 60_000 }).then(
-    () => page.getByRole('button', { name: 'Skip' }).click(),
-    () => undefined,
-  )
-  await expectVerdict(page)
-  // No duplicated turns: ids are unique per speaker and round.
-  const heads = await page.getByRole('heading', { level: 3 }).allTextContents()
+  await rebuttalBox(page).waitFor({ timeout: 60_000 })
+  // No duplicated turns in the transcript itself (checked before the verdict page replaces it).
+  const heads = await page.getByRole('log').getByRole('heading').allTextContents()
+  expect(heads.length).toBeGreaterThan(0)
   expect(heads.length).toBe(new Set(heads).size)
+  await page.getByRole('button', { name: 'Skip' }).click()
+  await expectVerdict(page)
 })
 
 test('share link opens in a fresh context', async ({ page, browser }) => {

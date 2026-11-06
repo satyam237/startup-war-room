@@ -24,13 +24,17 @@ export function connectDebate(
 ): () => void {
   const es = new EventSource(`${API_BASE}/debates/${encodeURIComponent(id)}/stream`)
   let stopped = false
+  let closedFired = false
 
   for (const name of EVENTS) {
     es.addEventListener(name, (e) => {
       const msg = e as MessageEvent<string>
       // `error` is also the EventSource transport-failure event; those have no data.
       if (typeof msg.data !== 'string') {
-        if (name === 'error' && !stopped && es.readyState === CLOSED) onClosed?.()
+        if (name === 'error' && !stopped && !closedFired && es.readyState === CLOSED) {
+          closedFired = true
+          onClosed?.()
+        }
         return
       }
       let data: unknown

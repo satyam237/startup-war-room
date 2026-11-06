@@ -49,7 +49,7 @@ test('a server restart mid-debate leaves an error, not a spinner', async ({ page
   // The restarted server marks the half-run debate failed; the open page must say so.
   const alert = page.getByRole('alert')
   await expect(alert).toBeVisible({ timeout: 60_000 })
-  await expect(alert).toContainText(/ended before|did not finish|lost|failed|went wrong|stopped/i)
+  await expect(alert).toContainText('This debate stopped before it finished. Please start a new one.')
   await expect(page.getByRole('link', { name: 'Start a new debate' })).toBeVisible()
   await expect(page.getByRole('timer')).toHaveCount(0)
 })
