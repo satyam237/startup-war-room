@@ -29,12 +29,13 @@ const EXAMPLES = [
   },
 ]
 
+/** Appends the answers whole; the caller must keep the result within MAX (never truncated here). */
 function withAnswers(pitch: string, questions: string[], answers: string[]): string {
   const extra = questions
     .map((q, i) => (answers[i]?.trim() ? `Q: ${q}\nA: ${answers[i].trim()}` : ''))
     .filter(Boolean)
     .join('\n')
-  return extra ? `${pitch}\n\nClarifications:\n${extra}`.slice(0, MAX) : pitch
+  return extra ? `${pitch}\n\nClarifications:\n${extra}` : pitch
 }
 
 export default function Pitch() {
@@ -49,7 +50,9 @@ export default function Pitch() {
   const [error, setError] = useState<string | null>(null)
 
   const len = pitch.length
-  const valid = len >= MIN && len <= MAX
+  const outgoing = questions ? withAnswers(pitch, questions, answers) : pitch
+  const overBy = outgoing.length - MAX
+  const valid = len >= MIN && len <= MAX && overBy <= 0
   const fill = Math.min(100, (len / MAX) * 100)
 
   async function send(body: CreateDebateBody) {
@@ -75,7 +78,7 @@ export default function Pitch() {
     e.preventDefault()
     if (!valid || busy) return
     if (questions) {
-      void send({ ...meta(), pitch: withAnswers(pitch, questions, answers), skip_clarify: true })
+      void send({ ...meta(), pitch: outgoing, skip_clarify: true })
     } else {
       void send({ ...meta(), pitch })
     }
@@ -180,6 +183,12 @@ export default function Pitch() {
               </div>
             ))}
           </fieldset>
+        )}
+
+        {questions && overBy > 0 && (
+          <p role="status" className="rounded-sm border border-vc/70 bg-vc/10 px-3 py-2 text-vc">
+            Your pitch plus your answers is {overBy} characters over the {MAX} limit. Shorten the pitch or an answer to continue.
+          </p>
         )}
 
         {error && (

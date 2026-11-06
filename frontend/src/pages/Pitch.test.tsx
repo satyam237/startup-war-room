@@ -99,6 +99,30 @@ describe('Pitch', () => {
     await waitFor(() => expect(submit()).toBeEnabled())
   })
 
+  it('keeps answers whole: blocks resubmit with a message when pitch + answers exceed 2000', async () => {
+    fetchMock
+      .mockReturnValueOnce(json(200, { status: 'needs_clarification', questions: ['Who pays?'] }))
+      .mockReturnValueOnce(json(201, { debate_id: 'big', delete_token: 't3' }))
+    setup()
+    await userEvent.click(box())
+    await userEvent.paste('p'.repeat(1900))
+    await userEvent.click(submit())
+    await screen.findByText('Who pays?')
+    await userEvent.click(screen.getByLabelText('Who pays?'))
+    await userEvent.paste('Homeowners in Pune and Mumbai' + ' and nearby suburbs'.repeat(5))
+    const cont = screen.getByRole('button', { name: /continue to debate/i })
+    expect(cont).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent(/characters over the 2000 limit/i)
+    await userEvent.clear(box())
+    await userEvent.paste('p'.repeat(1800))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    await userEvent.click(cont)
+    await screen.findByText('debate room')
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body)
+    expect(body.pitch.length).toBeLessThanOrEqual(2000)
+    expect(body.pitch).toContain('A: Homeowners in Pune and Mumbai' + ' and nearby suburbs'.repeat(5))
+  })
+
   it('422 shows the server detail', async () => {
     fetchMock.mockReturnValueOnce(json(422, { detail: 'Pitch looks off' }))
     setup()

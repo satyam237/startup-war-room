@@ -95,7 +95,8 @@ export function debateReducer(state: DebateState, action: DebateAction): DebateS
     }
     case 'turn_token': {
       const turn = state.turns[action.data.turn_id]
-      if (!turn) return state // token for a turn we never saw start; nothing to attach it to
+      // Tokens carry no agent/round, so an unseen turn cannot be created from one; late tokens after turn_end are stale.
+      if (!turn || turn.status === 'done') return state
       return { ...state, turns: { ...state.turns, [turn.id]: { ...turn, text: turn.text + action.data.text } } }
     }
     case 'turn_reset': {
