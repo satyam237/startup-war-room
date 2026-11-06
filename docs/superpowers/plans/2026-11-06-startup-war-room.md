@@ -6,16 +6,16 @@
 
 **Architecture:** FastAPI runs one background task per debate. Each task drives a LangGraph state graph whose nodes call a single LLM gateway and publish to an in-process event log. SSE subscribers read that log by sequence number, so reconnects replay without loss. A React client renders the events.
 
-**Tech Stack:** Python 3.12 (uv), FastAPI, sse-starlette, LangGraph, Pydantic v2, SQLAlchemy 2 async (aiosqlite, asyncpg), `anthropic` SDK; React + Vite + TypeScript + Tailwind v4, Recharts, react-router, Vitest, Playwright.
+**Tech Stack:** Python 3.12 (uv), FastAPI, sse-starlette, LangGraph, Pydantic v2, SQLAlchemy 2 async (aiosqlite, asyncpg), `openai` SDK pointed at OpenRouter; React + Vite + TypeScript + Tailwind v4, Recharts, react-router, Vitest, Playwright.
 
 **Spec:** `docs/plan.md` (§ numbers below refer to it). Executors read both.
 
 ## Global Constraints
 
 - Python `>=3.12,<3.14`, pinned with uv. The system Python is 3.14; do not use it.
-- Every LLM call goes through `app/llm.py`. No other module imports `anthropic`.
+- Every LLM call goes through `app/llm.py`. No other module imports `openai`. Model IDs live only in environment variables, so changing a model never needs a code change.
 - Keys come from environment variables only. `.env` is never committed. No key reaches the client.
-- Verify library APIs against installed versions or Context7 before coding (§12 says names are from memory). Claude API shapes below were verified against current docs: do not substitute remembered ones.
+- Verify library APIs against installed versions or Context7 before coding (§12 says names are from memory). Model IDs below were verified against OpenRouter's live `/models` list on 2026-11-06.
 - Caps: `MAX_TURNS=14`, 3 rounds, 120 words per turn, pitch 50 to 2000 chars, rebuttal max 500 chars, `RATE_LIMIT_PER_HOUR=5`.
 - Run one uvicorn worker. The event log and rebuttal queues are in-process. This is a documented v1 limit.
 - Never publish a metric that was not measured (§18).
@@ -25,8 +25,9 @@
 
 | Spec item | Decision | Why |
 |---|---|---|
-| Provider | Anthropic only behind the gateway; `LLM_PROVIDER=anthropic\|fake`. No OpenAI client in v1 | §11 wants one swap point, not two live providers |
-| Model routing (§11) | `FAST_MODEL=claude-haiku-5-5` (moderation, thinness, repetition, persona); `AGENT_MODEL=claude-sonnet-5-5` (critics, checkpoints); `JUDGE_MODEL=claude-opus-5-5` (verdict) | Matches task complexity; keeps cost near the USD 0.25 target (to be measured) |
+| Provider | OpenRouter behind the gateway; `LLM_PROVIDER=openrouter\|fake`. This supersedes §12 and §16 | The owner swaps models by use case and as new ones ship |
+| Model routing (§11) | `FAST_MODEL` and `AGENT_MODEL` = `openai/gpt-6.1-terra` (guards, persona, critics, checkpoints); `JUDGE_MODEL` = `openai/gpt-6.1-sol` (verdict); `ESCALATION_MODEL` = `anthropic/claude-opus-5.5` (only when the verdict has failed validation twice) | Owner's routing; Opus is reserved for the hardest step. `gpt-6-terra` is not listed on OpenRouter, so 6.1 is used |
+| Hosting | Heroku web dyno (one process, `Procfile`) + external Postgres (Supabase free tier) | Owner has a subscription; dyno disk is ephemeral so SQLite would lose debates |
 | 14 turns | 4+4+4 critic turns + 2 checkpoints = 14. Verdict, persona, guards, and regenerations are not turns; their tokens still count against budget | Spec arithmetic |
 | Intake and clarifying questions | Runs inside `POST /debates`, not in the graph. Thin pitch returns `needs_clarification` with up to 2 questions; client resubmits with answers and `skip_clarify: true` | The API contract has no mid-graph question channel |
 | Failed turn "shows retry" | One automatic retry, then a `turn_failed` note and the debate continues | Keeps a hands-free demo moving |
@@ -36,19 +37,16 @@
 | PDF export | Print stylesheet + `window.print()` | First item on the §17 cut list; costs almost nothing |
 | Agent modules | `agents/roster.py` plus `prompts/*.md`, not one file per critic | Critics differ only by prompt |
 
-## Claude API Rules for `app/llm.py`
+## OpenRouter Rules for `app/llm.py`
 
-Verified against current docs on 2026-11-06.
+Use `AsyncOpenAI(base_url=OPENROUTER_BASE_URL, api_key=OPENROUTER_API_KEY)`. Check each request shape below against OpenRouter's current docs before coding.
 
-- `AGENT_MODEL` calls: `thinking={"type": "between_tools"}`, `output_config={"effort": "low"}`, `max_tokens=600`. Agent calls have no tools, so this gives fast first tokens.
-- `FAST_MODEL` calls: `thinking={"type": "disabled"}`, `output_config={"effort": "low"}`.
-- `JUDGE_MODEL` calls: omit `thinking` (adaptive is the only mode), `output_config={"effort": "high"}`, `max_tokens=16000`.
-- Never send `temperature`, `top_p`, `top_k`, `budget_tokens`, or an assistant prefill. They return 400.
-- Structured output: `messages.parse(..., output_format=PydanticModel)`. Numeric bounds are enforced by Pydantic after parsing, so keep bounds out of what the schema must express if the API rejects them.
-- Sonnet and Opus calls use `client.beta.messages`, with `betas=["server-side-fallback-2026-07-01"]` and `fallbacks="default"`. Haiku has no server-side fallback. Skip the beta when the provider is not first-party.
-- Check `stop_reason` before reading content. `"refusal"` raises `LLMRefusal`; `"max_tokens"` on structured output raises `LLMError`.
-- Catch typed errors most-specific-first. SDK `max_retries=2`.
-- Prices per MTok (input/output): Opus 5.5 4/20, Sonnet 5.5 2/10, Haiku 5.5 0.10/0.50.
+- Tiers map to models by env var: `fast`, `agent`, `judge`, `escalation`. Reasoning effort: `low` for `fast` and `agent`, `high` for `judge` and `escalation`, sent through OpenRouter's `reasoning` parameter. Max output: `agent` 600 visible tokens' worth (raise if reasoning consumes the limit), `judge` and `escalation` 16000.
+- Structured output: `response_format` with `json_schema` built from the Pydantic model, with `provider.require_parameters` set so only capable hosts serve it. Always validate the reply with Pydantic locally, because models can change.
+- Cost comes from OpenRouter's usage accounting (`usage.cost`), not a price table, so a new model needs no code change. Streaming calls must capture usage from the final chunk. If a response has no cost, record `cost_usd=0` and log a warning.
+- `finish_reason` of `content_filter` or a refusal raises `LLMRefusal`; `length` on structured output raises `LLMError`. An error delivered mid-stream raises `LLMError`.
+- Catch typed SDK errors most-specific-first. Client `max_retries=2`.
+- Send an `X-Title: Startup War Room` header. Do not send the user's email or any personal data.
 
 ## SSE Event Contract
 
@@ -92,7 +90,7 @@ Inputs and conditions the spec implies but does not spell out. Each has a test i
 - Test: `backend/tests/conftest.py`, `backend/tests/test_health.py`, `backend/tests/test_db.py`
 
 **Interfaces:**
-- Produces: `get_settings() -> Settings` (pydantic-settings; all §16 variables plus `FAST_MODEL`, `REBUTTAL_TIMEOUT_S=45`, `DEBATE_TIMEOUT_S=240`, `MAX_CONCURRENT_DEBATES=10`; `MAX_TOKENS_PER_DEBATE=40000`; `LLM_PROVIDER` default `anthropic`).
+- Produces: `get_settings() -> Settings` (pydantic-settings; all §16 variables plus `FAST_MODEL`, `REBUTTAL_TIMEOUT_S=45`, `DEBATE_TIMEOUT_S=240`, `MAX_CONCURRENT_DEBATES=10`; `MAX_TOKENS_PER_DEBATE=40000`; `LLM_PROVIDER` default `openrouter`; `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `ESCALATION_MODEL`; no `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`).
 - Produces in `models.py`: `AgentName = Literal["vc","customer","cto","competitor","moderator"]`, `Turn`, `FinalPosition(score_1_to_10: int, top_risk: str, change_mind_if: str)`, `ScoreItem(score: int, why: str)`, `Scorecard`, `Risk(rank, risk, severity, raised_by)`, `Experiment(test, timebox_days, success_criteria, kill_criteria)`, `Verdict` exactly per §13, plus `Verdict.fallback: bool = False`. SQLAlchemy tables per §11 (no `share_slug`; add `delete_token_hash`).
 - Produces in `db.py`: `init_db()`, `create_debate(...)`, `get_debate(id)`, `add_turn(...)`, `save_verdict(...)`, `update_debate(id, **fields)`, `add_feedback(...)`, `delete_debate(id)`, `mark_running_failed() -> int`.
 
@@ -102,7 +100,7 @@ Inputs and conditions the spec implies but does not spell out. Each has a test i
 - [ ] **Step 4:** Run `uv run pytest -q`. Expected: PASS.
 - [ ] **Step 5:** Commit `feat(backend): skeleton, config, models, persistence`.
 
-### Task 2: LLM gateway — model: Opus 5.5
+### Task 2: LLM gateway — model: Sonnet 5.5
 
 **Files:**
 - Create: `backend/app/llm.py`, `backend/app/fake_llm.py`
@@ -111,7 +109,7 @@ Inputs and conditions the spec implies but does not spell out. Each has a test i
 **Interfaces:**
 - Produces:
   ```python
-  Tier = Literal["fast", "agent", "judge"]
+  Tier = Literal["fast", "agent", "judge", "escalation"]
   class Usage(BaseModel): model: str; tokens_in: int; tokens_out: int; cost_usd: float; latency_ms: int
   class LLMError(Exception): ...
   class LLMRefusal(LLMError): ...
@@ -119,13 +117,12 @@ Inputs and conditions the spec implies but does not spell out. Each has a test i
       def stream_text(self, tier, system, user, on_usage) -> AsyncIterator[str]: ...
       async def structured(self, tier, system, user, schema: type[T]) -> tuple[T, Usage]: ...
   def get_gateway() -> LLMGateway  # by LLM_PROVIDER
-  def estimate_cost(model, tokens_in, tokens_out) -> float
   ```
 - `FakeGateway(script: Callable | None = None)`: deterministic, sub-millisecond by default, with distinct text per agent and pitch-derived words, valid structured objects for any schema the app uses, and optional injected failures (`fail_on`, `refuse_on`, `delay_s`). Later tasks and the Playwright run all depend on it.
 
-- [ ] **Step 1:** Write failing tests against a stubbed SDK client: `test_agent_tier_request_shape` asserts model, `thinking`, `effort`, `max_tokens`, `fallbacks="default"`, and the beta header; `test_judge_tier_omits_thinking`; `test_no_sampling_params_sent`; `test_refusal_raises_llmrefusal`; `test_rate_limit_error_maps_to_llmerror`; `test_usage_cost_math` (1M in + 1M out on Sonnet is 12.0); `test_fake_gateway_is_deterministic`; `test_fake_stream_differs_per_agent`.
+- [ ] **Step 1:** Write failing tests against a stubbed SDK client: `test_tier_uses_model_from_env` (changing `AGENT_MODEL` changes the request with no code change); `test_judge_tier_uses_high_reasoning`; `test_structured_sends_json_schema_and_require_parameters`; `test_structured_invalid_json_raises_llmerror`; `test_content_filter_raises_llmrefusal`; `test_rate_limit_error_maps_to_llmerror`; `test_midstream_error_raises_llmerror`; `test_usage_cost_read_from_response`; `test_missing_cost_records_zero_and_warns`; `test_fake_gateway_is_deterministic`; `test_fake_stream_differs_per_agent`.
 - [ ] **Step 2:** Run `uv run pytest tests/test_llm.py -q`. Expected: FAIL.
-- [ ] **Step 3:** Implement per "Claude API Rules". Timeouts: fast 15s, agent 45s, judge 120s. Log model, tokens, cost, latency as one structured line per call.
+- [ ] **Step 3:** Implement per "OpenRouter Rules". Timeouts: fast 15s, agent 45s, judge and escalation 120s. Log model, tokens, cost, latency as one structured line per call.
 - [ ] **Step 4:** Run tests. Expected: PASS.
 - [ ] **Step 5:** Commit `feat(llm): gateway with routing, accounting, and fake provider`.
 
@@ -133,7 +130,7 @@ Inputs and conditions the spec implies but does not spell out. Each has a test i
 
 ## Phase 2: Agents and Guards
 
-### Task 3: Prompts, roster, and persona builder — model: Opus 5.5
+### Task 3: Prompts, roster, and persona builder — model: Sonnet 5.5
 
 **Files:**
 - Create: `backend/app/prompts/{base,vc,customer,cto,competitor,moderator,verdict,persona}.md`, `backend/app/agents/__init__.py`, `backend/app/agents/roster.py`, `backend/app/agents/persona.py`, `backend/app/agents/moderator.py`
@@ -170,7 +167,7 @@ Inputs and conditions the spec implies but does not spell out. Each has a test i
 
 ## Phase 3: Orchestration
 
-### Task 5: Verdict engine — model: Opus 5.5
+### Task 5: Verdict engine — model: Sonnet 5.5
 
 **Files:**
 - Create: `backend/app/verdict.py`
@@ -181,9 +178,9 @@ Inputs and conditions the spec implies but does not spell out. Each has a test i
 
 Consistency rules (`avg` = mean of the 5 scores): `go` needs `avg >= 6.0`; `no_go` needs `avg <= 5.0`; `pivot` needs `3.5 <= avg <= 7.5`. `confidence` in 0..1. Exactly 5 risks, ranks 1 to 5. Exactly 3 experiments, each with non-empty kill criteria and `timebox_days >= 1`. Every `why` names at least one of VC, Customer, CTO, Competitor. `raised_by` is a critic.
 
-Ladder: call `judge`, validate; on failure retry once with the errors appended; then one repair prompt; then `fallback_verdict`.
+Ladder: call `judge`, validate; on failure retry once with the errors appended; then one repair prompt on the `escalation` tier; then `fallback_verdict`.
 
-- [ ] **Step 1:** Write failing tests: `test_consistent_passes`; parametrised `test_go_with_avg_5_fails`, `test_no_go_with_avg_8_fails`, `test_four_risks_fails`, `test_two_experiments_fails`, `test_why_without_agent_fails`; `test_retry_includes_error_text`; `test_repair_used_after_retry`; `test_fallback_after_three_failures_sets_fallback_true`; `test_fallback_with_no_final_positions_is_valid`; `test_fallback_passes_check_consistency`.
+- [ ] **Step 1:** Write failing tests: `test_consistent_passes`; parametrised `test_go_with_avg_5_fails`, `test_no_go_with_avg_8_fails`, `test_four_risks_fails`, `test_two_experiments_fails`, `test_why_without_agent_fails`; `test_retry_includes_error_text`; `test_repair_uses_escalation_tier_after_retry`; `test_fallback_after_three_failures_sets_fallback_true`; `test_fallback_with_no_final_positions_is_valid`; `test_fallback_passes_check_consistency`.
 - [ ] **Step 2:** Run. Expected: FAIL.
 - [ ] **Step 3:** Implement. `fallback_verdict` derives scores from final positions, the transcript, or neutral defaults, sets `fallback=True`, and its summary says the verdict is partial.
 - [ ] **Step 4:** Run. Expected: PASS.
@@ -336,9 +333,9 @@ Implementers load the `frontend-design` skill. The product should feel like a te
 ### Task 14: Packaging and docs — model: Sonnet 5.5
 
 **Files:**
-- Create: `backend/Dockerfile`, `render.yaml`, `frontend/vercel.json`, `README.md`, `.github/workflows/ci.yml`
+- Create: `Procfile`, `.python-version`, `backend/Dockerfile`, `frontend/vercel.json`, `README.md`, `.github/workflows/ci.yml`
 
-- [ ] **Step 1:** Write the Dockerfile with uvicorn `--workers 1 --proxy-headers --forwarded-allow-ips='*'`, `render.yaml`, and `vercel.json` with SPA rewrites.
+- [ ] **Step 1:** Write the `Procfile` (`web: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips='*'`), confirming how Heroku's Python buildpack handles a uv project in a `backend/` subdirectory; the Dockerfile with the same command so the app stays portable to a free host; and `vercel.json` with SPA rewrites.
 - [ ] **Step 2:** Write the README: setup, fake-provider quickstart, architecture diagram, env table, known limits (§18 honest limits, single worker, in-flight debates lost on restart), and no unmeasured metrics.
 - [ ] **Step 3:** Add CI for pytest, frontend tests, and build, all with the fake provider.
 - [ ] **Step 4:** Verify: `docker build ./backend` if Docker is available, and CI passes on the PR. If Docker is not available, say so.
@@ -357,7 +354,7 @@ These need a credential, spend money, or publish something.
 
 | Gate | Needs | What happens |
 |---|---|---|
-| G1: Real model run | `ANTHROPIC_API_KEY` with a spend cap | Run one real debate, tune prompts on 3 pitches (§19: samey agents) |
+| G1: Real model run | `OPENROUTER_API_KEY` with a credit limit | Run one real debate, tune prompts on 3 pitches (§19: samey agents) |
 | G2: Eval run | Your approval; roughly USD 5 at target cost, to be measured | Run all 20 pitches, fix the top 3 failure modes, record real metrics |
-| G3: Deploy | Backend host account; go-ahead | Deploy backend and Vercel frontend; fresh-browser check on production |
+| G3: Deploy | Heroku app + Supabase Postgres URL; go-ahead | Deploy backend to Heroku and frontend to Vercel; fresh-browser check on production |
 | G4: Public repo and demo | Your decision and your recording | Flip repo public; record the 60-second demo; fill the write-up with measured numbers |
