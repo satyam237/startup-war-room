@@ -32,5 +32,22 @@ def test_tests_do_not_read_env_files():
     assert key_is_blank
 
 
+def test_heroku_postgres_url_is_normalised_for_asyncpg():
+    fake = "postgres://user:pw@ec2-1-2-3-4.compute-1.amazonaws.com:5432/dbname"
+    expected = "postgresql+asyncpg://user:pw@ec2-1-2-3-4.compute-1.amazonaws.com:5432/dbname"
+    assert Settings(DATABASE_URL=fake).DATABASE_URL == expected
+    assert Settings(DATABASE_URL="postgresql://u:p@h/d").DATABASE_URL == "postgresql+asyncpg://u:p@h/d"
+
+
+def test_sslmode_query_is_dropped_and_other_urls_untouched():
+    assert Settings(DATABASE_URL="postgres://u:p@h/d?sslmode=require").DATABASE_URL == (
+        "postgresql+asyncpg://u:p@h/d"
+    )
+    assert Settings(DATABASE_URL="postgresql+asyncpg://u:p@h/d").DATABASE_URL == (
+        "postgresql+asyncpg://u:p@h/d"
+    )
+    assert Settings(DATABASE_URL="sqlite+aiosqlite:///./x.db").DATABASE_URL == "sqlite+aiosqlite:///./x.db"
+
+
 def test_tests_run_on_the_fake_provider():
     assert Settings().LLM_PROVIDER == "fake"

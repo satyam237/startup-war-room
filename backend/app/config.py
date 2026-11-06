@@ -1,7 +1,9 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -33,6 +35,17 @@ class Settings(BaseSettings):
     REBUTTAL_TIMEOUT_S: float = 45
     DEBATE_TIMEOUT_S: int = 240
     MAX_CONCURRENT_DEBATES: int = 10
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def _asyncpg_url(cls, v: str) -> str:
+        """Heroku supplies postgres://. Use the asyncpg driver and drop `sslmode`, which
+        asyncpg rejects; SSL is set in db.py through connect_args instead."""
+        if not v.startswith(("postgres://", "postgresql://")):
+            return v
+        url = make_url(v).set(drivername="postgresql+asyncpg")
+        query = {k: val for k, val in url.query.items() if k != "sslmode"}
+        return url.set(query=query).render_as_string(hide_password=False)
 
 
 @lru_cache
