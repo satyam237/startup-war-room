@@ -27,7 +27,7 @@
 |---|---|---|
 | Provider | OpenRouter behind the gateway; `LLM_PROVIDER=openrouter\|fake`. This supersedes §12 and §16 | The owner swaps models by use case and as new ones ship |
 | Model routing (§11) | `FAST_MODEL` and `AGENT_MODEL` = `openai/gpt-6.1-terra` (guards, persona, critics, checkpoints); `JUDGE_MODEL` = `openai/gpt-6.1-sol` (verdict); `ESCALATION_MODEL` = `anthropic/claude-opus-5.5` (only when the verdict has failed validation twice) | Owner's routing; Opus is reserved for the hardest step. `gpt-6-terra` is not listed on OpenRouter, so 6.1 is used |
-| Hosting | Heroku web dyno (one process, `Procfile`) + external Postgres (Supabase free tier) | Owner has a subscription; dyno disk is ephemeral so SQLite would lose debates |
+| Hosting | Heroku Basic dyno (one process, `Procfile`) + Heroku Postgres Essential-0, about USD 12 a month | Owner's platform credits; Basic does not sleep; dyno disk is ephemeral so SQLite would lose debates |
 | 14 turns | 4+4+4 critic turns + 2 checkpoints = 14. Verdict, persona, guards, and regenerations are not turns; their tokens still count against budget | Spec arithmetic |
 | Intake and clarifying questions | Runs inside `POST /debates`, not in the graph. Thin pitch returns `needs_clarification` with up to 2 questions; client resubmits with answers and `skip_clarify: true` | The API contract has no mid-graph question channel |
 | Failed turn "shows retry" | One automatic retry, then a `turn_failed` note and the debate continues | Keeps a hands-free demo moving |
@@ -337,7 +337,7 @@ Implementers load the `frontend-design` skill. The product should feel like a te
 
 - [ ] **Step 1:** Write the `Procfile` (`web: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips='*'`), confirming how Heroku's Python buildpack handles a uv project in a `backend/` subdirectory; the Dockerfile with the same command so the app stays portable to a free host; and `vercel.json` with SPA rewrites.
 - [ ] **Step 2:** Write the README: setup, fake-provider quickstart, architecture diagram, env table, known limits (§18 honest limits, single worker, in-flight debates lost on restart), and no unmeasured metrics.
-- [ ] **Step 3:** Add CI for pytest, frontend tests, and build, all with the fake provider.
+- [ ] **Step 3:** Normalise Heroku's `postgres://` `DATABASE_URL` to `postgresql+asyncpg://` in `config.py`, with SSL enabled and a test. Add CI for pytest, frontend tests, and build, all with the fake provider.
 - [ ] **Step 4:** Verify: `docker build ./backend` if Docker is available, and CI passes on the PR. If Docker is not available, say so.
 - [ ] **Step 5:** Commit `chore: packaging, CI, README`.
 
@@ -356,5 +356,5 @@ These need a credential, spend money, or publish something.
 |---|---|---|
 | G1: Real model run | `OPENROUTER_API_KEY` with a credit limit | Run one real debate, tune prompts on 3 pitches (§19: samey agents) |
 | G2: Eval run | Your approval; roughly USD 5 at target cost, to be measured | Run all 20 pitches, fix the top 3 failure modes, record real metrics |
-| G3: Deploy | Heroku app + Supabase Postgres URL; go-ahead | Deploy backend to Heroku and frontend to Vercel; fresh-browser check on production |
+| G3: Deploy | Heroku CLI login or API key; go-ahead | Deploy backend to Heroku and frontend to Vercel; fresh-browser check on production |
 | G4: Public repo and demo | Your decision and your recording | Flip repo public; record the 60-second demo; fill the write-up with measured numbers |
