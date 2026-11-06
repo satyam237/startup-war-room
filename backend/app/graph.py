@@ -3,8 +3,11 @@
 setup -> round_1 -> moderator_1 -> rebuttal -> round_2 -> moderator_2 -> round_3 -> verdict -> report
 
 Any step before round_3 that exhausts the token, turn, or time budget jumps to `verdict`
-with status `budget_exceeded`. Everything the client sees goes through `Deps.log`, using
-the SSE contract's event names and payloads.
+with status `budget_exceeded`. The token cap is a hard stop: once reached, no further LLM
+call starts, so a debate at the cap ends on `fallback_verdict`. Time works in two stages:
+turns stop when only JUDGE_RESERVE_S is left, and the deadline itself cuts off whatever is
+still running. Everything the client sees goes through `Deps.log`, using the SSE
+contract's event names and payloads.
 
 Two LangGraph behaviours shape the rebuttal step (langgraph 1.2.20, checked by running it):
 - A node re-executes from its first line on resume, so `rebuttal` publishes nothing before
@@ -40,6 +43,9 @@ from app.verdict import fallback_verdict, generate_verdict
 logger = logging.getLogger("app.graph")
 
 LAST_ROUND = 3
+# Turns stop this long before the deadline, so the judge gets a real chance to run.
+# An estimate until live debates are measured.
+JUDGE_RESERVE_S = 45
 # Below this, a high-effort judge call cannot realistically finish, so it is not started.
 JUDGE_MIN_REMAINING_S = 20
 REGENERATE_NOTE = "\n\nYour draft repeated a point already made in the debate. Make a new point."
@@ -199,11 +205,14 @@ class _Meter:
     def remaining_s(self) -> float:
         return self._deadline - self._clock()
 
+    def tokens_spent(self) -> bool:
+        return self.budget["tokens_used"] >= self.budget["max_tokens"]
+
     def exhausted(self) -> bool:
         return (
-            self.budget["tokens_used"] >= self.budget["max_tokens"]
+            self.tokens_spent()
             or self.budget["turns_used"] >= self.budget["max_turns"]
-            or self.remaining_s() <= 0
+            or self.remaining_s() <= JUDGE_RESERVE_S
         )
 
     def status_after(self, state: DebateState) -> str:
@@ -255,8 +264,10 @@ class _Debate:
         attempts: "itertools.count[int]",
         call: Callable[[], Awaitable[Any]],
     ) -> Any | None:
-        """Announce and run `call`, retrying once on LLMError. None means both tries failed."""
+        """Announce and run `call`, retrying once on LLMError. None means no try succeeded."""
         for _ in range(2):
+            if meter.tokens_spent():
+                return None
             attempt = next(attempts)
             self.log.publish("turn_start", {"turn_id": turn_id, "agent": agent, "round": round, "attempt": attempt})
             try:
@@ -313,7 +324,8 @@ class _Debate:
                     meter, turn_id, agent, round, attempts, lambda: self._stream(meter, turn_id, system, user)
                 )
                 earlier = [t["text"] for t in view["transcript"]]
-                if text is not None and await is_repeat(self.deps.gw, text, earlier, on_usage=meter.add):
+                check = text is not None and not meter.tokens_spent()
+                if check and await is_repeat(self.deps.gw, text, earlier, on_usage=meter.add):
                     self.log.publish("turn_reset", {"turn_id": turn_id, "reason": "repetition"})
                     regenerated = await self._with_retry(
                         meter, turn_id, agent, round, attempts,
@@ -400,6 +412,8 @@ class _Debate:
         try:
             async with asyncio.timeout(meter.remaining_s()):
                 for _ in range(2):
+                    if meter.tokens_spent():
+                        break
                     try:
                         checkpoint = await run_checkpoint(self.deps.gw, state, round, on_usage=meter.add)
                         break
@@ -433,7 +447,7 @@ class _Debate:
 
     async def rebuttal(self, state: DebateState) -> dict[str, Any]:
         meter = self._meter(state)
-        timeout_s = min(self.deps.settings.REBUTTAL_TIMEOUT_S, math.ceil(meter.remaining_s()))
+        timeout_s = min(self.deps.settings.REBUTTAL_TIMEOUT_S, math.ceil(meter.remaining_s() - JUDGE_RESERVE_S))
         answer = interrupt({"timeout_s": timeout_s})
         text = (answer or "").strip() or None
         self.log.publish("rebuttal_received", {"text": text})
@@ -442,17 +456,25 @@ class _Debate:
     async def verdict(self, state: DebateState) -> dict[str, Any]:
         meter = self._meter(state)
         remaining = meter.remaining_s()
-        if not state["transcript"] or remaining < JUDGE_MIN_REMAINING_S:
-            result = fallback_verdict(state)  # nothing to judge, or no time to judge it
+        status = state["status"]
+        if not state["transcript"]:
+            result = fallback_verdict(state)  # nothing to judge
+        elif meter.tokens_spent() or remaining < JUDGE_MIN_REMAINING_S:
+            result, status = fallback_verdict(state), "budget_exceeded"
         else:
             try:
                 async with asyncio.timeout(remaining):
-                    result = await generate_verdict(self.deps.gw, state, on_usage=meter.add)
+                    result = await generate_verdict(
+                        self.deps.gw, state, on_usage=meter.add,
+                        may_continue=lambda: not meter.tokens_spent(),
+                    )
+                if result.fallback and meter.tokens_spent():
+                    status = "budget_exceeded"
             except TimeoutError:
                 logger.warning("judge hit the deadline debate=%s", state["debate_id"])
-                result = fallback_verdict(state)
+                result, status = fallback_verdict(state), "budget_exceeded"
         self.log.publish("verdict", result.model_dump(mode="json"))
-        return {"verdict": result.model_dump(mode="json"), "budget": meter.budget}
+        return {"verdict": result.model_dump(mode="json"), "budget": meter.budget, "status": status}
 
     async def report(self, state: DebateState) -> dict[str, Any]:
         status = "complete" if state["status"] == "running" else state["status"]

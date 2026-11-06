@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.llm import LLMError, LLMRefusal, Tier, Usage
+from app.models import Verdict
 
 _VOICES = [
     "The unit economics worry me until I see retention data.",
@@ -91,9 +92,40 @@ def _build(schema: dict, defs: dict, name: str = "value") -> Any:
     return None
 
 
+_FAKE_CRITICS = ("VC", "Customer", "CTO", "Competitor")
+
+
+def _fake_verdict() -> dict[str, Any]:
+    """A verdict that passes check_consistency; schema-built data cannot, as it has one risk."""
+    dimensions = ("market", "customer_pull", "feasibility", "defensibility", "timing")
+    return {
+        "recommendation": "pivot",
+        "confidence": 0.5,
+        "scorecard": {
+            d: {"score": 5, "why": f"Fake reasoning from the {_FAKE_CRITICS[i % 4]}."}
+            for i, d in enumerate(dimensions)
+        },
+        "risks": [
+            {"rank": i, "risk": f"Fake risk {i}", "severity": "med", "raised_by": _FAKE_CRITICS[(i - 1) % 4]}
+            for i in range(1, 6)
+        ],
+        "experiments": [
+            {
+                "test": f"Fake experiment {i}",
+                "timebox_days": 7,
+                "success_criteria": "5 of 10 prospects say yes",
+                "kill_criteria": "Fewer than 2 of 10 prospects say yes",
+            }
+            for i in range(1, 4)
+        ],
+        "one_line_summary": "Fake verdict: narrow the wedge and test willingness to pay.",
+        "fallback": False,
+    }
+
+
 def default_object(schema: type[BaseModel], app_fields: set[str] | None = None) -> BaseModel:
     js = schema.model_json_schema()
-    data = _build(js, js.get("$defs", {}))
+    data = _fake_verdict() if schema is Verdict else _build(js, js.get("$defs", {}))
     for k in app_fields or ():
         data.pop(k, None)  # let the model's own defaults apply
     return schema.model_validate(data)

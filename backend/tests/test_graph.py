@@ -7,6 +7,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.agents.moderator import Checkpoint
 from app.agents.persona import _PersonaOut
 from app.agents.roster import CRITIC_ORDER
+from app import graph as graph_module
 from app.config import get_settings
 from app.events import EventLog
 from app.fake_llm import FakeGateway
@@ -204,12 +205,16 @@ async def test_failed_regeneration_keeps_the_original_text():
     def script(call):
         if call["schema"] is _RepeatVerdict:
             return {"repeat": True}
+        if call["kind"] == "stream":
+            return "original draft"
         return default_script(call)
 
     rig = Rig(FakeGateway(script, fail_on=regen_fails))
     await rig.run()
     assert rig.named("turn_failed") == []
-    assert len(rig.named("turn_end")) == 12
+    assert len(rig.named("turn_reset")) == 7
+    assert [d["text"] for d in rig.named("turn_end") if d["round"] < 3] == ["original draft"] * 8
+    assert [t["text"] for t in rig.store.turns if t["round"] == 1 and t["agent"] != "moderator"] == ["original draft"] * 4
 
 
 async def test_failed_turn_continues_with_note():
@@ -339,10 +344,86 @@ async def test_token_budget_jumps_to_verdict_status_budget_exceeded():
     assert 0 < len(rig.named("turn_end")) < 4
     assert rig.named("await_rebuttal") == []
     assert rig.named("rebuttal_received") == []
-    assert len(rig.named("verdict")) == 1
+    # Hard stop: persona, VC, Customer reach 6000 tokens, and nothing at all runs after that.
+    assert len(rig.gw.calls) == 3
+    assert rig.calls(is_verdict) == []
+    assert [d["fallback"] for d in rig.named("verdict")] == [True]
     assert rig.named("done") == [{"status": "budget_exceeded"}]
     assert result["status"] == "budget_exceeded"
     assert rig.store.fields["status"] == "budget_exceeded"
+
+
+async def test_no_retry_after_the_token_cap():
+    class BilledStream(FakeGateway):
+        attempts = 0
+
+        async def stream_text(self, tier, system, user, on_usage):
+            if "You are the VC" in user:
+                self.attempts += 1
+                on_usage(Usage(model="fake", tokens_in=5000, tokens_out=0, cost_usd=0.0, latency_ms=0))
+                raise LLMError("failed after billing")
+            async for piece in super().stream_text(tier, system, user, on_usage):
+                yield piece
+
+    gw = BilledStream(default_script, usage_per_call=(0, 0, 0.0))
+    rig = Rig(gw, MAX_TOKENS_PER_DEBATE=5000)
+    await rig.run()
+    assert gw.attempts == 1
+    assert [d["agent"] for d in rig.named("turn_failed")] == ["vc"]
+    assert [c["schema"] for c in gw.calls] == [_PersonaOut]
+
+
+async def test_no_repeat_check_after_the_token_cap():
+    rig = Rig(FakeGateway(default_script, usage_per_call=(1000, 1000, 0.0)), MAX_TOKENS_PER_DEBATE=4000)
+    await rig.run()
+    assert rig.calls(lambda c: c["schema"] is _RepeatVerdict) == []
+    assert len(rig.gw.calls) == 2
+
+
+async def test_no_regeneration_after_the_token_cap():
+    def script(call):
+        return {"repeat": True} if call["schema"] is _RepeatVerdict else default_script(call)
+
+    # persona, VC, Customer, and the Customer's repeat check reach 8000.
+    rig = Rig(FakeGateway(script, usage_per_call=(1000, 1000, 0.0)), MAX_TOKENS_PER_DEBATE=8000)
+    await rig.run()
+    assert len(rig.gw.calls) == 4
+    assert [d["agent"] for d in rig.named("turn_end")] == ["vc", "customer"]
+    assert rig.named("turn_failed") == []
+
+
+async def test_no_checkpoint_retry_after_the_token_cap():
+    class BilledCheckpoint(FakeGateway):
+        attempts = 0
+
+        async def structured(self, tier, system, user, schema, app_fields=None):
+            if schema is Checkpoint:
+                self.attempts += 1
+                exc = LLMError("failed after billing")
+                exc.usage = Usage(model="fake", tokens_in=5000, tokens_out=0, cost_usd=0.0, latency_ms=0)
+                raise exc
+            return await super().structured(tier, system, user, schema, app_fields)
+
+    gw = BilledCheckpoint(default_script, usage_per_call=(0, 0, 0.0))
+    rig = Rig(gw, MAX_TOKENS_PER_DEBATE=5000)
+    await rig.run()
+    assert gw.attempts == 1
+    assert rig.named("done") == [{"status": "budget_exceeded"}]
+
+
+async def test_verdict_ladder_stops_when_the_judge_spends_the_cap():
+    def script(call):
+        if is_verdict(call):
+            return good_verdict().model_copy(update={"risks": []})  # fails check_consistency
+        return default_script(call)
+
+    # 22 calls before the verdict = 44000 tokens, under the cap; the first judge call reaches it.
+    rig = Rig(FakeGateway(script, usage_per_call=(1000, 1000, 0.0)), MAX_TOKENS_PER_DEBATE=46000)
+    await rig.run()
+    assert len(rig.named("turn_end")) == 12
+    assert len(rig.calls(is_verdict)) == 1
+    assert rig.named("verdict")[0]["fallback"] is True
+    assert rig.named("done") == [{"status": "budget_exceeded"}]
 
 
 async def test_budget_exhausted_at_end_of_round_1_skips_rebuttal():
@@ -354,13 +435,19 @@ async def test_budget_exhausted_at_end_of_round_1_skips_rebuttal():
     assert rig.named("done") == [{"status": "budget_exceeded"}]
 
 
-async def test_budget_spent_on_the_last_turn_is_not_flagged():
-    probe = Rig(FakeGateway(default_script, usage_per_call=(1000, 1000, 0.0)), MAX_TOKENS_PER_DEBATE=10**9)
-    measured = await probe.run()
-    # The cap equals the total at the end of Round 3: reached, but only after every turn ran.
-    before_verdict = measured["budget"]["tokens_used"] - 2000
-    rig = Rig(FakeGateway(default_script, usage_per_call=(1000, 1000, 0.0)), MAX_TOKENS_PER_DEBATE=before_verdict)
+async def test_cap_reached_on_the_last_turn_skips_the_judge():
+    rig = Rig(FakeGateway(default_script, usage_per_call=(1000, 1000, 0.0)), MAX_TOKENS_PER_DEBATE=44000)
     await rig.run()
+    assert len(rig.named("turn_end")) == 12
+    assert rig.calls(is_verdict) == []
+    assert rig.named("verdict")[0]["fallback"] is True
+    assert rig.named("done") == [{"status": "budget_exceeded"}]
+
+
+async def test_cap_just_above_the_last_turn_still_gets_the_judge():
+    rig = Rig(FakeGateway(default_script, usage_per_call=(1000, 1000, 0.0)), MAX_TOKENS_PER_DEBATE=44001)
+    await rig.run()
+    assert rig.named("verdict")[0]["fallback"] is False
     assert rig.named("done") == [{"status": "complete"}]
 
 
@@ -446,6 +533,8 @@ async def test_judge_skipped_when_it_cannot_fit():
     assert len(rig.named("turn_end")) == 12
     assert rig.calls(is_verdict) == []
     assert rig.named("verdict")[0]["fallback"] is True
+    assert rig.named("done") == [{"status": "budget_exceeded"}]
+    assert rig.store.fields["status"] == "budget_exceeded"
 
 
 async def test_judge_cut_off_at_the_deadline_falls_back(monkeypatch):
@@ -466,9 +555,30 @@ async def test_judge_cut_off_at_the_deadline_falls_back(monkeypatch):
     rig = Rig(SlowJudge(script), clock=clock, DEBATE_TIMEOUT_S=240)
     await asyncio.wait_for(rig.run(), 5)
     assert rig.named("verdict")[0]["fallback"] is True
+    assert rig.named("done") == [{"status": "budget_exceeded"}]
 
 
-async def test_turn_in_progress_is_cut_off_at_the_deadline():
+async def test_turns_stop_early_enough_for_the_judge():
+    clock = Clock()
+
+    def script(call):
+        if in_round(call, 1) and "You are the Customer" in call["user"]:
+            clock.now += 240 - graph_module.JUDGE_RESERVE_S  # exactly the reserve left
+        return default_script(call)
+
+    rig = Rig(FakeGateway(script), clock=clock, DEBATE_TIMEOUT_S=240)
+    await rig.run()
+    assert [d["agent"] for d in rig.named("turn_end")] == ["vc", "customer"]
+    assert len(rig.calls(is_verdict)) == 1  # the reserve left the judge room to run
+    assert rig.named("verdict")[0]["fallback"] is False
+    assert rig.named("done") == [{"status": "budget_exceeded"}]
+
+
+def test_reserve_leaves_more_than_the_judge_minimum():
+    assert graph_module.JUDGE_RESERVE_S > graph_module.JUDGE_MIN_REMAINING_S
+
+
+async def test_turn_in_progress_is_cut_off_at_the_deadline(monkeypatch):
     class Hangs(FakeGateway):
         async def stream_text(self, tier, system, user, on_usage):
             if "You are the Customer" in user:
@@ -477,6 +587,7 @@ async def test_turn_in_progress_is_cut_off_at_the_deadline():
             async for piece in super().stream_text(tier, system, user, on_usage):
                 yield piece
 
+    monkeypatch.setattr("app.graph.JUDGE_RESERVE_S", 0)
     rig = Rig(Hangs(default_script), DEBATE_TIMEOUT_S=0.1)
     result = await asyncio.wait_for(rig.run(), 5)
     assert rig.named("turn_failed")[0]["agent"] == "customer"
@@ -490,7 +601,7 @@ async def test_rebuttal_window_does_not_outlast_the_deadline():
 
     def script(call):
         if call["schema"] is Checkpoint:
-            clock.now += 230  # 10s left when the rebuttal opens
+            clock.now += 230 - graph_module.JUDGE_RESERVE_S  # 10s left before the judge's reserve
         return default_script(call)
 
     rig = Rig(FakeGateway(script), clock=clock, DEBATE_TIMEOUT_S=240, REBUTTAL_TIMEOUT_S=45)

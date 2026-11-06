@@ -5,6 +5,7 @@ Ladder: judge -> judge retry (errors appended) -> escalation repair -> fallback_
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 from app.agents import field
@@ -89,24 +90,38 @@ def _with_errors(user: str, errors: list[str], previous: Verdict | None, heading
     return out + "\n\nReturn a corrected verdict."
 
 
-async def generate_verdict(gw: LLMGateway, state: dict[str, Any], on_usage: UsageSink = None) -> Verdict:
-    """Always returns a Verdict: validated if any rung succeeds, else fallback_verdict."""
+async def generate_verdict(
+    gw: LLMGateway,
+    state: dict[str, Any],
+    on_usage: UsageSink = None,
+    may_continue: Callable[[], bool] = lambda: True,
+) -> Verdict:
+    """Always returns a Verdict: validated if any rung succeeds, else fallback_verdict.
+
+    `may_continue` is asked before every rung after the first; False ends the ladder there.
+    """
     try:
-        return await _ladder(gw, state, on_usage)
+        return await _ladder(gw, state, on_usage, may_continue)
     except Exception:
         logger.exception("verdict ladder failed; using fallback")
         return fallback_verdict(state)
 
 
-async def _ladder(gw: LLMGateway, state: dict[str, Any], on_usage: UsageSink) -> Verdict:
+async def _ladder(
+    gw: LLMGateway, state: dict[str, Any], on_usage: UsageSink, may_continue: Callable[[], bool]
+) -> Verdict:
     system, user = verdict_prompt(state)
     v, errors = await _attempt(gw, "judge", system, user, on_usage)
     if v is not None and not errors:
         return v
+    if not may_continue():
+        return fallback_verdict(state)
     retry_user = _with_errors(user, errors, v, "Your previous verdict was rejected for these reasons:")
     v2, errors2 = await _attempt(gw, "judge", system, retry_user, on_usage)
     if v2 is not None and not errors2:
         return v2
+    if not may_continue():
+        return fallback_verdict(state)
     repair_user = _with_errors(user, errors2, v2, "Two verdict attempts failed validation. Fix every problem below:")
     v3, errors3 = await _attempt(gw, "escalation", system, repair_user, on_usage)
     if v3 is not None and not errors3:

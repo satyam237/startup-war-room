@@ -287,3 +287,10 @@ def test_fallback_single_position():
     assert check_consistency(v) == []
     assert v.risks[0].raised_by == "CTO"
     assert v.experiments[0].test == "a pilot"
+
+
+async def test_ladder_stops_when_the_caller_says_so():
+    gw = _scripted([make((5, 5, 5, 5, 5), "go")])  # fails check_consistency
+    v = await generate_verdict(gw, STATE, may_continue=lambda: False)
+    assert v.fallback is True
+    assert len(gw.calls) == 1

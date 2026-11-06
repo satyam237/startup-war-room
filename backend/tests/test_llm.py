@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.fake_llm import FakeGateway
 from app.llm import LLMError, LLMRefusal, OpenRouterGateway, get_gateway
 from app.models import FinalPosition, Verdict
+from app.verdict import check_consistency
 
 POSITION = {"score_1_to_10": 6, "top_risk": "churn", "change_mind_if": "retention data"}
 
@@ -339,6 +340,15 @@ async def test_app_fields_excluded_from_schema_and_defaulted():
     await gw.structured("judge", "s", "u", Verdict)
     sent2 = stub.requests[1]["response_format"]["json_schema"]["schema"]
     assert "fallback" in sent2["properties"]
+
+
+async def test_fake_default_verdict_passes_consistency_and_is_deterministic():
+    gw = FakeGateway()
+    first, _ = await gw.structured("judge", "s", "u", Verdict, app_fields={"fallback"})
+    second, _ = await gw.structured("judge", "other", "prompt", Verdict, app_fields={"fallback"})
+    assert check_consistency(first) == []
+    assert first == second
+    assert first.fallback is False
 
 
 async def test_fake_app_fields_and_usage_per_call():
