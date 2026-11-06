@@ -19,8 +19,11 @@ RECOMMENDATIONS = {"go": "Go", "pivot": "Pivot", "no_go": "No-go"}
 
 
 def _defang(text: str) -> str:
-    """Stop link, image and raw-HTML syntax from rendering in text that is not ours."""
-    return text.replace("![", "!\\[").replace("](", "]\\(").replace("<", "&lt;")
+    """Stop link, image, reference-link, autolink and raw-HTML syntax from rendering."""
+    return (
+        text.replace("[", "\\[").replace("]", "\\]").replace("<", "&lt;")
+        .replace("://", ":\\/\\/").replace("www.", "www\\.")
+    )
 
 
 def quote(text: str) -> str:
@@ -72,7 +75,7 @@ def render_markdown(debate: dict[str, Any]) -> str:
         f"**Recommendation:** {RECOMMENDATIONS.get(verdict['recommendation'], verdict['recommendation'])} "
         f"(confidence {verdict['confidence']:.0%})",
         "",
-        inline(verdict["one_line_summary"]),
+        quote(verdict["one_line_summary"]),
         "",
         "### Scorecard",
         "",
@@ -82,7 +85,7 @@ def render_markdown(debate: dict[str, Any]) -> str:
         out.append(f"- **{label}:** {item['score']}/10. {inline(item['why'])}")
     out += ["", "### Risks", ""]
     for risk in sorted(verdict["risks"], key=lambda r: r["rank"]):
-        out.append(f"{risk['rank']}. [{risk['severity']}] {inline(risk['risk'])} (raised by {inline(risk['raised_by'])})")
+        out.append(f"{risk['rank']}. \\[{inline(risk['severity'])}\\] {inline(risk['risk'])} (raised by {inline(risk['raised_by'])})")
     out += ["", "### Experiments", ""]
     for exp in verdict["experiments"]:
         out += [

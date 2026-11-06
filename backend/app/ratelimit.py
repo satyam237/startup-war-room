@@ -79,10 +79,11 @@ def client_ip(request: Request, trusted_hops: int) -> str:
     malformed header falls back to the socket peer.
     """
     peer = request.client.host if request.client else "unknown"
-    header = request.headers.get("x-forwarded-for")
-    if trusted_hops < 1 or not header:
+    # Every header line counts, in order: a client can send its own line before the router's.
+    joined = ",".join(request.headers.getlist("x-forwarded-for"))
+    entries = [e.strip() for e in joined.split(",") if e.strip()]
+    if trusted_hops < 1 or not entries:
         return peer
-    entries = [e.strip() for e in header.split(",")]
     if len(entries) < trusted_hops:
         return peer
     try:

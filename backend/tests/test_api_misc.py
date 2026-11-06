@@ -87,8 +87,34 @@ async def test_export_quotes_user_text_so_it_cannot_forge_sections(client):
     lines = body.split("\n")
     assert [l for l in lines if l.startswith("## Verdict")] == ["## Verdict"]
     assert not any(l.startswith("# Pwned") for l in lines)
-    assert "![" not in body and "](" not in body
+    import re
+    assert not re.search(r"(?<!\\)\[|(?<!\\)\]", body)  # every bracket is escaped
     assert "> ## Verdict" in body
+
+
+async def test_hostile_model_text_in_verdict_cannot_forge_a_heading(client):
+    hostile = VERDICT.model_copy(update={
+        "one_line_summary": "## Verdict\n# Pwned\n[a][r]\n\n[r]: http://evil.example\nsee http://evil.example www.evil.example",
+        "risks": [VERDICT.risks[0].model_copy(update={"risk": "x\n## Verdict", "raised_by": "## Verdict"})],
+    })
+    await db.create_debate("evil2", PITCH, {}, db.hash_token("t"))
+    await db.save_verdict("evil2", hostile)
+    await db.update_debate("evil2", status="complete")
+    body = (await client.get("/debates/evil2/export")).text
+    lines = body.split("\n")
+    assert [l for l in lines if l.startswith("## Verdict")] == ["## Verdict"]
+    assert not any(l.startswith("# Pwned") for l in lines)
+    assert "http://" not in body and "https://" not in body and "www." not in body
+    import re
+    assert not re.search(r"(?<!\\)\[|(?<!\\)\]", body)
+
+
+async def test_unknown_debate_feedback_does_not_burn_quota(client):
+    app.state.feedback_limiter = RateLimiter(1, 3600)
+    for _ in range(3):
+        assert (await client.post("/debates/nope/feedback", json={"rating": 3})).status_code == 404
+    debate_id = await finished_debate()
+    assert (await client.post(f"/debates/{debate_id}/feedback", json={"rating": 3})).status_code == 201
 
 
 # ---- feedback ----
@@ -280,6 +306,30 @@ async def test_xff_ignored_with_zero_hops(client, monkeypatch):
 @pytest.mark.parametrize("header", ["", "not-an-ip", "1.1.1.1, ,", "a, b, c"])
 async def test_malformed_xff_falls_back_to_socket_address(client, monkeypatch, header):
     assert await ip_bucket_test(client, monkeypatch, 1, header, header) == (201, 429)
+
+
+async def post_with_lines(client, lines):
+    return (await client.post("/debates", json=BODY, headers=[("X-Forwarded-For", v) for v in lines])).status_code
+
+
+async def test_multiple_xff_lines_use_last_entry_across_lines(client, monkeypatch):
+    from tests.test_api_stream import configure
+    configure(monkeypatch, TRUSTED_PROXY_HOPS=1)
+    install(FakeGateway())
+    use_limits(1)
+    # the client's own line comes first and must not pick the bucket; the router's line is last
+    assert await post_with_lines(client, ["6.6.6.6", "9.9.9.9"]) == 201
+    assert await post_with_lines(client, ["7.7.7.7", "9.9.9.9"]) == 429
+    assert await post_with_lines(client, ["7.7.7.7", "8.8.8.8"]) == 201
+
+
+async def test_empty_xff_entries_across_lines_are_skipped(client, monkeypatch):
+    from tests.test_api_stream import configure
+    configure(monkeypatch, TRUSTED_PROXY_HOPS=1)
+    install(FakeGateway())
+    use_limits(1)
+    assert await post_with_lines(client, ["6.6.6.6", ", ,", "9.9.9.9", ""]) == 201
+    assert await post_with_lines(client, ["5.5.5.5", "", "9.9.9.9, "]) == 429
 
 
 # ---- limiter unit ----

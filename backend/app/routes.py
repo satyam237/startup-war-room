@@ -132,13 +132,13 @@ async def export_debate(debate_id: str, fmt: Annotated[str, Query(alias="format"
 
 @router.post("/debates/{debate_id}/feedback", status_code=201)
 async def post_feedback(debate_id: str, body: Feedback, request: Request) -> dict[str, str]:
+    debate = await db.get_debate(debate_id)
+    if debate is None:  # before the limiter, so unknown ids burn no quota
+        raise HTTPException(404, "Debate not found.")
     limiter = request.app.state.feedback_limiter
     ip = client_ip(request, get_settings().TRUSTED_PROXY_HOPS)
     if not limiter.check(ip):
         raise HTTPException(429, TOO_MANY, headers={"Retry-After": str(limiter.retry_after_s(ip))})
-    debate = await db.get_debate(debate_id)
-    if debate is None:
-        raise HTTPException(404, "Debate not found.")
     if debate["status"] == "running":
         raise HTTPException(409, "Rate this debate once it has finished.")
     if debate["feedback"]:
