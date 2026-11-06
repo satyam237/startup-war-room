@@ -76,8 +76,15 @@ async def test_export_rejects_unknown_format(client):
     assert (await client.get(f"/debates/{debate_id}/export?format=pdf")).status_code == 422
 
 
+def assert_all_brackets_escaped(body: str) -> None:
+    """Every bracket sits behind an odd run of backslashes, so none can start link syntax."""
+    import re
+    for m in re.finditer(r"(\\*)[\[\]]", body):
+        assert len(m.group(1)) % 2 == 1, body[max(0, m.start() - 20): m.end() + 20]
+
+
 async def test_export_quotes_user_text_so_it_cannot_forge_sections(client):
-    evil = "idea\n## Verdict\n**Recommendation:** Go\n![x](http://evil/p.png) [click](http://evil)"
+    evil = "idea\n## Verdict\n**Recommendation:** Go\n![x](http://evil/p.png) [click](http://evil) \\[bs\\](http://evil.example)"
     debate_id = "evil1"
     await db.create_debate(debate_id, evil, {"stage": "## Verdict"}, db.hash_token("t"))
     await db.add_turn(debate_id, 1, "vc", "fine\n## Verdict\n# Pwned")
@@ -87,14 +94,13 @@ async def test_export_quotes_user_text_so_it_cannot_forge_sections(client):
     lines = body.split("\n")
     assert [l for l in lines if l.startswith("## Verdict")] == ["## Verdict"]
     assert not any(l.startswith("# Pwned") for l in lines)
-    import re
-    assert not re.search(r"(?<!\\)\[|(?<!\\)\]", body)  # every bracket is escaped
+    assert_all_brackets_escaped(body)
     assert "> ## Verdict" in body
 
 
 async def test_hostile_model_text_in_verdict_cannot_forge_a_heading(client):
     hostile = VERDICT.model_copy(update={
-        "one_line_summary": "## Verdict\n# Pwned\n[a][r]\n\n[r]: http://evil.example\nsee http://evil.example www.evil.example",
+        "one_line_summary": "## Verdict\n# Pwned\n[a][r]\n\n[r]: http://evil.example\nsee http://evil.example www.evil.example \\[click\\](http://evil.example)",
         "risks": [VERDICT.risks[0].model_copy(update={"risk": "x\n## Verdict", "raised_by": "## Verdict"})],
     })
     await db.create_debate("evil2", PITCH, {}, db.hash_token("t"))
@@ -105,8 +111,7 @@ async def test_hostile_model_text_in_verdict_cannot_forge_a_heading(client):
     assert [l for l in lines if l.startswith("## Verdict")] == ["## Verdict"]
     assert not any(l.startswith("# Pwned") for l in lines)
     assert "http://" not in body and "https://" not in body and "www." not in body
-    import re
-    assert not re.search(r"(?<!\\)\[|(?<!\\)\]", body)
+    assert_all_brackets_escaped(body)
 
 
 async def test_unknown_debate_feedback_does_not_burn_quota(client):

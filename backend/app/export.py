@@ -21,7 +21,7 @@ RECOMMENDATIONS = {"go": "Go", "pivot": "Pivot", "no_go": "No-go"}
 def _defang(text: str) -> str:
     """Stop link, image, reference-link, autolink and raw-HTML syntax from rendering."""
     return (
-        text.replace("[", "\\[").replace("]", "\\]").replace("<", "&lt;")
+        text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("<", "&lt;")
         .replace("://", ":\\/\\/").replace("www.", "www\\.")
     )
 
