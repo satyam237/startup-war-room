@@ -12,6 +12,8 @@ const VERDICT: Verdict = {
   fallback: false,
 }
 
+const FP = { score_1_to_10: 4, top_risk: 'Unit economics', change_mind_if: 'CAC under 30 dollars' }
+
 const run = (actions: DebateAction[]) => actions.reduce(debateReducer, initialDebateState)
 const start = (seq: number, turn_id = 't1'): DebateAction => ({
   type: 'turn_start', seq, data: { turn_id, agent: 'vc', round: 1, attempt: 1 },
@@ -43,8 +45,8 @@ describe('debateReducer', () => {
 
   it('turn_end sets final text and position', () => {
     const s = run([start(1), tok(2, 'draft'),
-      { type: 'turn_end', seq: 3, data: { turn_id: 't1', agent: 'vc', round: 1, text: 'final', final_position: 'pass' } }])
-    expect(s.turns.t1).toMatchObject({ text: 'final', status: 'done', finalPosition: 'pass' })
+      { type: 'turn_end', seq: 3, data: { turn_id: 't1', agent: 'vc', round: 1, text: 'final', final_position: FP } }])
+    expect(s.turns.t1).toMatchObject({ text: 'final', status: 'done', finalPosition: FP })
   })
 
   it('handles setup, checkpoint, rebuttal, failure, verdict, error, done', () => {
@@ -71,9 +73,9 @@ describe('debateReducer', () => {
   })
 
   it('turn_end for an unseen turn_id creates the finished turn', () => {
-    const s = run([{ type: 'turn_end', seq: 1, data: { turn_id: 'z', agent: 'cto', round: 2, text: 'done', final_position: 'no' } }])
+    const s = run([{ type: 'turn_end', seq: 1, data: { turn_id: 'z', agent: 'cto', round: 2, text: 'done', final_position: FP } }])
     expect(s.order).toEqual(['z'])
-    expect(s.turns.z).toMatchObject({ agent: 'cto', round: 2, text: 'done', status: 'done', finalPosition: 'no' })
+    expect(s.turns.z).toMatchObject({ agent: 'cto', round: 2, text: 'done', status: 'done', finalPosition: FP })
   })
 
   it('turn_token for an unseen turn_id is ignored', () => {
@@ -105,5 +107,22 @@ describe('debateReducer', () => {
   it('await_rebuttal opens the window', () => {
     const s = run([{ type: 'await_rebuttal', seq: 1, data: { timeout_s: 45 } }])
     expect(s.awaitingRebuttal).toEqual({ timeout_s: 45 })
+  })
+
+  it('turn_failed closes the matching streaming turn and keeps others open', () => {
+    const s = run([
+      start(1, 't1'),
+      { type: 'turn_start', seq: 2, data: { turn_id: 't2', agent: 'cto', round: 1, attempt: 1 } },
+      { type: 'turn_failed', seq: 3, data: { agent: 'vc', round: 1, note: 'gave up' } },
+    ])
+    expect(s.turns.t1.status).toBe('done')
+    expect(s.turns.t2.status).toBe('streaming')
+    expect(s.failures).toHaveLength(1)
+  })
+
+  it('tolerates a moderator turn_failed with no turn_start', () => {
+    const s = run([{ type: 'turn_failed', seq: 1, data: { agent: 'moderator', round: 1, note: 'no summary' } }])
+    expect(s.order).toEqual([])
+    expect(s.failures).toEqual([{ agent: 'moderator', round: 1, note: 'no summary' }])
   })
 })

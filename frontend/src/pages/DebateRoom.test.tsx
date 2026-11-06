@@ -184,4 +184,18 @@ describe('DebateRoom', () => {
     unmount()
     expect(es.closed).toBe(true)
   })
+
+  it('renders a Round 3 turn_end with the real final_position object shape', async () => {
+    setup()
+    await connected()
+    start('t9', 'competitor', 3)
+    emit('turn_end', {
+      turn_id: 't9', agent: 'competitor', round: 3, text: 'Final word.',
+      final_position: { score_1_to_10: 3, top_risk: 'Incumbents copy it in a quarter', change_mind_if: 'A signed anchor customer' },
+    })
+    const card = screen.getByTestId('agent-competitor')
+    expect(card).toHaveTextContent('3')
+    expect(card).toHaveTextContent('Incumbents copy it in a quarter')
+    expect(card).toHaveTextContent('A signed anchor customer')
+  })
 })

@@ -44,7 +44,14 @@ export default function AgentCard({ agent, active, turns, latest }: Props) {
       </div>
       <p className="mt-1 text-sm text-muted">{ROLE[agent]}</p>
       {latest?.finalPosition && (
-        <p className="mt-2 border-t border-line pt-2 font-body text-sm leading-snug">{latest.finalPosition}</p>
+        <div className="mt-2 space-y-1 border-t border-line pt-2 font-body text-sm leading-snug">
+          <p>
+            <span className="font-display text-base font-extrabold text-(--agent)">{latest.finalPosition.score_1_to_10}</span>
+            <span className="text-muted"> out of 10</span>
+          </p>
+          <p>{latest.finalPosition.top_risk}</p>
+          <p className="text-muted">Changes my mind: {latest.finalPosition.change_mind_if}</p>
+        </div>
       )}
     </section>
   )
