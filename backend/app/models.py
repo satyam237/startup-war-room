@@ -99,6 +99,8 @@ class TurnRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    # What replay needs beyond the text: `top_disagreements` or `final_position`.
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class VerdictRow(Base):

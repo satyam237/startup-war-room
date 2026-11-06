@@ -677,3 +677,17 @@ async def test_pitch_stays_delimited_in_critic_prompts():
     rig = Rig()
     await rig.run()
     assert all("<pitch>" in c["user"] for c in rig.calls(is_critic))
+
+
+async def test_store_gets_the_fields_a_replay_needs():
+    rig = Rig()
+    await rig.run()
+    checkpoints = [t for t in rig.store.turns if t["agent"] == "moderator"]
+    assert [t["details"] for t in checkpoints] == [
+        {"top_disagreements": c["top_disagreements"]} for c in rig.named("checkpoint")
+    ]
+    finals = [t for t in rig.store.turns if t["round"] == 3]
+    assert [t["details"] for t in finals] == [
+        {"final_position": e["final_position"]} for e in rig.named("turn_end") if e["round"] == 3
+    ]
+    assert all(t["details"] is None for t in rig.store.turns if t["round"] < 3 and t["agent"] != "moderator")

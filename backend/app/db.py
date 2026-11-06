@@ -106,6 +106,7 @@ async def get_debate(debate_id: str) -> dict[str, Any] | None:
                 "created_at": t.created_at,
                 "tokens_in": t.tokens_in,
                 "tokens_out": t.tokens_out,
+                "details": t.details,
             }
             for t in turns
         ]
@@ -135,6 +136,7 @@ async def add_turn(
     text: str,
     tokens_in: int = 0,
     tokens_out: int = 0,
+    details: dict | None = None,
 ) -> int:
     async with _get_sessionmaker()() as s:
         row = TurnRow(
@@ -144,6 +146,7 @@ async def add_turn(
             text=text,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
+            details=details,
         )
         s.add(row)
         await s.commit()

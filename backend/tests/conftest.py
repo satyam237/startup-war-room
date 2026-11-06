@@ -1,12 +1,16 @@
 import os
 
 os.environ["LLM_PROVIDER"] = "fake"
+os.environ.pop("OPENROUTER_API_KEY", None)
 
 import httpx
 import pytest_asyncio
 
 from app import db
-from app.config import get_settings
+from app.config import Settings, get_settings
+
+# Tests never read the owner's real keys. Must run before anything builds a Settings.
+Settings.model_config["env_file"] = None
 
 
 @pytest_asyncio.fixture(autouse=True)

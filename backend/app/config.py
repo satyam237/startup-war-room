@@ -1,10 +1,17 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+# Found from this file, not the working directory. A later file wins, so backend/.env
+# overrides the repo root's.
+ENV_FILES = (_BACKEND_DIR.parent / ".env", _BACKEND_DIR / ".env")
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILES, extra="ignore")
 
     LLM_PROVIDER: str = "openrouter"  # openrouter | fake
     OPENROUTER_API_KEY: str = ""
@@ -19,7 +26,7 @@ class Settings(BaseSettings):
     MAX_TURNS: int = 14
     MAX_TOKENS_PER_DEBATE: int = 40000
     RATE_LIMIT_PER_HOUR: int = 5
-    REBUTTAL_TIMEOUT_S: int = 45
+    REBUTTAL_TIMEOUT_S: float = 45
     DEBATE_TIMEOUT_S: int = 240
     MAX_CONCURRENT_DEBATES: int = 10
 

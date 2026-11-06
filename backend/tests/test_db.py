@@ -69,3 +69,12 @@ def test_scores_outside_1_to_10_rejected(bad):
 def test_scores_boundaries_accepted():
     assert ScoreItem(score=1, why="x").score == 1
     assert FinalPosition(score_1_to_10=10, top_risk="r", change_mind_if="c").score_1_to_10 == 10
+
+
+async def test_turn_details_round_trip():
+    await db.create_debate("d1", "p")
+    await db.add_turn("d1", 1, "moderator", "summary", details={"top_disagreements": ["a", "b"]})
+    await db.add_turn("d1", 1, "vc", "plain")
+    turns = (await db.get_debate("d1"))["turns"]
+    assert turns[0]["details"] == {"top_disagreements": ["a", "b"]}
+    assert turns[1]["details"] is None

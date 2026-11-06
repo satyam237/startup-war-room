@@ -82,7 +82,14 @@ class DebateStore(Protocol):
     """Persistence callbacks. The signatures match app.db, so that module fits as is."""
 
     async def add_turn(
-        self, debate_id: str, round: int, agent: str, text: str, tokens_in: int = 0, tokens_out: int = 0
+        self,
+        debate_id: str,
+        round: int,
+        agent: str,
+        text: str,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        details: dict[str, Any] | None = None,
     ) -> Any: ...
 
     async def save_verdict(self, debate_id: str, verdict: Verdict) -> None: ...
@@ -99,10 +106,24 @@ class InMemoryStore:
     fields: dict[str, Any] = field(default_factory=dict)
 
     async def add_turn(
-        self, debate_id: str, round: int, agent: str, text: str, tokens_in: int = 0, tokens_out: int = 0
+        self,
+        debate_id: str,
+        round: int,
+        agent: str,
+        text: str,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        details: dict[str, Any] | None = None,
     ) -> None:
         self.turns.append(
-            {"round": round, "agent": agent, "text": text, "tokens_in": tokens_in, "tokens_out": tokens_out}
+            {
+                "round": round,
+                "agent": agent,
+                "text": text,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "details": details,
+            }
         )
 
     async def save_verdict(self, debate_id: str, verdict: Verdict) -> None:
@@ -309,6 +330,7 @@ class _Debate:
         await self.deps.store.add_turn(
             view["debate_id"], round, agent, text,
             tokens_in=meter.turn_tokens_in, tokens_out=meter.turn_tokens_out,
+            details=None if final_position is None else {"final_position": final_position},
         )
 
     async def _critic_turn(self, meter: _Meter, view: dict[str, Any], agent: str, round: int) -> None:
@@ -432,6 +454,7 @@ class _Debate:
             await self.deps.store.add_turn(
                 state["debate_id"], round, "moderator", checkpoint.summary,
                 tokens_in=meter.turn_tokens_in, tokens_out=meter.turn_tokens_out,
+                details={"top_disagreements": checkpoint.top_disagreements},
             )
         return {
             "moderator_notes": notes,
