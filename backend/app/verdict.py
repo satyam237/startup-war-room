@@ -3,6 +3,7 @@
 Ladder: judge -> judge retry (errors appended) -> escalation repair -> fallback_verdict.
 """
 
+import logging
 import re
 from typing import Any
 
@@ -13,6 +14,7 @@ from app.guards import UsageSink
 from app.llm import LLMError, LLMGateway
 from app.models import Experiment, Risk, Scorecard, ScoreItem, Verdict
 
+logger = logging.getLogger("app.verdict")
 _CRITIC_LABELS = [LABELS[a] for a in CRITIC_ORDER]  # VC, Customer, CTO, Competitor
 _CRITIC_KEYS = {k.casefold() for k in CRITIC_ORDER} | {v.casefold() for v in _CRITIC_LABELS}
 _NAME_RE = re.compile(r"\b(" + "|".join(map(re.escape, _CRITIC_LABELS)) + r")\b", re.IGNORECASE)
@@ -56,8 +58,12 @@ def check_consistency(v: Verdict) -> list[str]:
 
 
 def _report(on_usage: UsageSink, usage: Any) -> None:
-    if on_usage is not None and usage is not None:
+    if on_usage is None or usage is None:
+        return
+    try:
         on_usage(usage)
+    except Exception:  # a broken sink must never break the verdict
+        logger.exception("verdict on_usage callback failed")
 
 
 async def _attempt(
@@ -66,8 +72,10 @@ async def _attempt(
     """One LLM call. Returns (verdict, errors); a gateway failure yields (None, [message])."""
     try:
         v, usage = await gw.structured(tier, system, user, Verdict, app_fields={"fallback"})
-    except LLMError as exc:
-        _report(on_usage, exc.usage)
+    except Exception as exc:  # LLMError or anything else; CancelledError is BaseException and propagates
+        _report(on_usage, getattr(exc, "usage", None))
+        if not isinstance(exc, LLMError):
+            logger.exception("verdict attempt failed unexpectedly")
         return None, [f"the previous call failed: {exc}"]
     _report(on_usage, usage)
     v = v.model_copy(update={"fallback": False})  # a provider may ignore strict mode and set it
@@ -83,6 +91,14 @@ def _with_errors(user: str, errors: list[str], previous: Verdict | None, heading
 
 async def generate_verdict(gw: LLMGateway, state: dict[str, Any], on_usage: UsageSink = None) -> Verdict:
     """Always returns a Verdict: validated if any rung succeeds, else fallback_verdict."""
+    try:
+        return await _ladder(gw, state, on_usage)
+    except Exception:
+        logger.exception("verdict ladder failed; using fallback")
+        return fallback_verdict(state)
+
+
+async def _ladder(gw: LLMGateway, state: dict[str, Any], on_usage: UsageSink) -> Verdict:
     system, user = verdict_prompt(state)
     v, errors = await _attempt(gw, "judge", system, user, on_usage)
     if v is not None and not errors:
@@ -98,13 +114,22 @@ async def generate_verdict(gw: LLMGateway, state: dict[str, Any], on_usage: Usag
     return fallback_verdict(state)
 
 
+def _positions(state: dict[str, Any]) -> dict[str, Any]:
+    """Final positions of the four critics only; tolerates malformed state."""
+    fp = state.get("final_positions")
+    if not isinstance(fp, dict):
+        return {}
+    return {a: p for a, p in fp.items() if a in CRITIC_ORDER}
+
+
 def _fallback_scores(state: dict[str, Any]) -> int:
-    scores = [
-        int(field(p, "score_1_to_10"))
-        for p in (state.get("final_positions") or {}).values()
-        if field(p, "score_1_to_10") is not None
-    ]
-    return max(1, min(10, round(sum(scores) / len(scores)))) if scores else 5
+    scores: list[int] = []
+    for p in _positions(state).values():
+        try:
+            scores.append(max(1, min(10, int(field(p, "score_1_to_10")))))
+        except (TypeError, ValueError):
+            continue
+    return round(sum(scores) / len(scores)) if scores else 5
 
 
 def _first_sentence(text: str, limit: int = 160) -> str:
@@ -114,10 +139,11 @@ def _first_sentence(text: str, limit: int = 160) -> str:
 
 def _fallback_risks(state: dict[str, Any]) -> list[Risk]:
     found: list[tuple[str, str]] = []  # (agent label, text)
-    for agent, pos in (state.get("final_positions") or {}).items():
-        if agent in LABELS and field(pos, "top_risk"):
+    for agent, pos in _positions(state).items():
+        if field(pos, "top_risk"):
             found.append((LABELS[agent], str(field(pos, "top_risk"))))
-    for t in state.get("transcript") or []:
+    transcript = state.get("transcript")
+    for t in transcript if isinstance(transcript, list) else []:
         agent, text = field(t, "agent"), field(t, "text")
         if agent in CRITIC_ORDER and text and len(found) < 5:
             found.append((LABELS[agent], _first_sentence(str(text))))
@@ -137,7 +163,7 @@ def _fallback_risks(state: dict[str, Any]) -> list[Risk]:
 def _fallback_experiments(state: dict[str, Any]) -> list[Experiment]:
     conditions = [
         str(field(p, "change_mind_if"))
-        for p in (state.get("final_positions") or {}).values()
+        for p in _positions(state).values()
         if field(p, "change_mind_if")
     ]
     defaults = [
@@ -159,9 +185,44 @@ def _fallback_experiments(state: dict[str, Any]) -> list[Experiment]:
 
 def fallback_verdict(state: dict[str, Any]) -> Verdict:
     """A partial verdict built without an LLM. Always passes check_consistency."""
+    try:
+        v = _build_fallback(state)
+        if not check_consistency(v):
+            return v
+        logger.error("fallback verdict failed consistency; using minimal fallback")
+    except Exception:
+        logger.exception("fallback verdict failed on malformed state; using minimal fallback")
+    return _minimal_fallback()
+
+
+def _minimal_fallback() -> Verdict:
+    why = "No analysis available; VC, Customer, CTO and Competitor views were not synthesised."
+    return Verdict(
+        recommendation="pivot",
+        confidence=0.1,
+        scorecard=Scorecard(**{d: ScoreItem(score=5, why=why) for d in _DIMENSIONS}),
+        risks=[
+            Risk(rank=i, risk="Not assessed; the verdict is partial", severity="med", raised_by=_CRITIC_LABELS[i % 4])
+            for i in range(1, 6)
+        ],
+        experiments=[
+            Experiment(
+                test="Interview 10 target customers about their current workaround",
+                timebox_days=7,
+                success_criteria="At least 5 of 10 show clear demand",
+                kill_criteria="Fewer than 2 of 10 show demand after 7 days",
+            )
+            for _ in range(3)
+        ],
+        one_line_summary="Partial verdict: the analysis could not be completed, so this is a neutral placeholder.",
+        fallback=True,
+    )
+
+
+def _build_fallback(state: dict[str, Any]) -> Verdict:
     s = _fallback_scores(state)
     rec = "go" if s >= 7 else "no_go" if s <= 3 else "pivot"
-    had_positions = bool(state.get("final_positions"))
+    had_positions = bool(_positions(state))
     basis = "the panelists' final scores" if had_positions else "neutral defaults, because no final scores were recorded"
     why = f"Estimate from {basis}; VC, Customer, CTO and Competitor views were not synthesised."
     return Verdict(

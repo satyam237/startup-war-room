@@ -139,6 +139,7 @@ async def test_gateway_errors_fall_through_and_report_usage():
     v = await generate_verdict(gw, STATE, on_usage=seen.append)
     assert v.fallback is True
     assert len(gw.calls) == 3
+    assert seen == []  # FakeGateway failures carry no usage
 
 
 async def test_on_usage_fires_for_every_attempt():
@@ -178,3 +179,111 @@ def test_prompt_states_exact_counts():
     system, _ = verdict_prompt({"pitch": "x"})
     assert "exactly five" in system
     assert "exactly three" in system
+
+
+@pytest.mark.parametrize(
+    "scores,rec,ok",
+    [
+        ((6, 6, 6, 6, 5), "go", False),  # avg 5.8
+        ((5, 5, 5, 5, 6), "no_go", False),  # avg 5.2
+        ((3, 3, 3, 4, 4), "pivot", False),  # avg 3.4
+        ((8, 8, 7, 7, 8), "pivot", False),  # avg 7.6
+    ],
+)
+def test_failing_side_boundaries(scores, rec, ok):
+    assert (check_consistency(make(scores, rec)) == []) is ok
+
+
+@pytest.mark.parametrize("scores", [(5, 5, 5, 6, 6), (5, 5, 6, 6, 6)])  # avg 5.4 and 5.6
+def test_mid_range_only_pivot_passes(scores):
+    # Five integer scores cannot average exactly 5.5; these bracket it.
+    assert check_consistency(make(scores, "pivot")) == []
+    assert check_consistency(make(scores, "go"))
+    assert check_consistency(make(scores, "no_go"))
+
+
+async def test_non_llm_error_from_gateway_falls_through():
+    class Boom:
+        calls = 0
+
+        async def structured(self, *a, **k):
+            Boom.calls += 1
+            raise RuntimeError("boom")
+
+    v = await generate_verdict(Boom(), STATE)
+    assert v.fallback is True
+    assert Boom.calls == 3
+    assert check_consistency(v) == []
+
+
+async def test_raising_on_usage_does_not_break_verdict():
+    def bad(_):
+        raise RuntimeError("sink down")
+
+    gw = _scripted([make()])
+    v = await generate_verdict(gw, STATE, on_usage=bad)
+    assert v.fallback is False
+
+
+async def test_malformed_state_returns_fallback():
+    v = await generate_verdict(FakeGateway(), {})  # no pitch: verdict_prompt raises KeyError
+    assert v.fallback is True
+    assert check_consistency(v) == []
+
+
+@pytest.mark.parametrize(
+    "fp",
+    [
+        {"vc": {"score_1_to_10": "high", "top_risk": "r", "change_mind_if": "c"}},
+        {"vc": None, "cto": 7, "customer": {"score_1_to_10": None}},
+        "not a dict",
+        {"vc": {"score_1_to_10": [1], "top_risk": 5, "change_mind_if": {"x": 1}}},
+    ],
+)
+def test_fallback_survives_malformed_final_positions(fp):
+    v = fallback_verdict({"pitch": "x", "transcript": "oops", "final_positions": fp})
+    assert v.fallback is True
+    assert check_consistency(v) == []
+
+
+def test_fallback_skips_unparseable_scores():
+    fp = {
+        "vc": {"score_1_to_10": "high", "top_risk": "r", "change_mind_if": "c"},
+        "cto": {"score_1_to_10": 9, "top_risk": "r", "change_mind_if": "c"},
+    }
+    v = fallback_verdict({"pitch": "x", "final_positions": fp})
+    assert v.scorecard.market.score == 9
+
+
+def test_fallback_ignores_moderator_position():
+    fp = {
+        "moderator": {"score_1_to_10": 1, "top_risk": "mod risk", "change_mind_if": "c"},
+        "vc": {"score_1_to_10": 8, "top_risk": "vc risk", "change_mind_if": "c"},
+    }
+    v = fallback_verdict({"pitch": "x", "final_positions": fp})
+    assert check_consistency(v) == []
+    assert all(r.raised_by != "Moderator" for r in v.risks)
+    assert v.scorecard.market.score == 8
+
+
+def test_fallback_moderator_only_position_is_valid():
+    fp = {"moderator": {"score_1_to_10": 1, "top_risk": "mod risk", "change_mind_if": "c"}}
+    v = fallback_verdict({"pitch": "x", "final_positions": fp})
+    assert check_consistency(v) == []
+    assert v.scorecard.market.score == 5
+
+
+@pytest.mark.parametrize("score,rec", [(1, "no_go"), (10, "go")])
+def test_fallback_extremes(score, rec):
+    fp = {a: {"score_1_to_10": score, "top_risk": "r", "change_mind_if": "c"} for a in ("vc", "customer", "cto", "competitor")}
+    v = fallback_verdict({"pitch": "x", "final_positions": fp})
+    assert v.recommendation == rec
+    assert check_consistency(v) == []
+
+
+def test_fallback_single_position():
+    fp = {"cto": {"score_1_to_10": 7, "top_risk": "data pipeline", "change_mind_if": "a pilot"}}
+    v = fallback_verdict({"pitch": "x", "final_positions": fp})
+    assert check_consistency(v) == []
+    assert v.risks[0].raised_by == "CTO"
+    assert v.experiments[0].test == "a pilot"
