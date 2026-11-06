@@ -8,6 +8,8 @@ callback (also on failed calls, via `exc.usage`) so callers can account for it.
 import json
 import logging
 import re
+import sys
+import unicodedata
 from collections.abc import Callable
 from typing import Any
 
@@ -23,15 +25,26 @@ DEFAULT_REFUSAL = "This pitch cannot be debated because it appears to promote se
 UsageSink = Callable[[Usage], None] | None
 
 
+_FORMAT_CHARS = "".join(
+    chr(c) for c in range(sys.maxunicode + 1) if unicodedata.category(chr(c)) == "Cf"
+)
+_FORMAT_RE = re.compile(f"[{re.escape(_FORMAT_CHARS)}]")
+# Whitespace or invisible format characters (zero-width space, joiners, bidi marks, ...).
+_GAP = rf"(?:\s|[{re.escape(_FORMAT_CHARS)}])*"
+
+
 def wrap_untrusted(tag: str, text: str) -> str:
     """Wrap user text in <tag>...</tag>, defusing any tag the text itself contains.
 
-    Matching open/close tags (any case, optional inner whitespace) have their leading
-    `<` escaped, so the text cannot close the block early. Other characters, including
-    emoji and Devanagari, pass through untouched.
+    Every open or close form of the tag is escaped (`<` becomes `&lt;`) whatever follows
+    the name (`</tag foo>`, `</tag/>`, unterminated `</tag`), case-insensitively, with
+    whitespace allowed inside. Unicode format characters (category Cf) are stripped from
+    inside such tag-like text so a zero-width character cannot hide a tag. Everywhere
+    else, text is untouched, so emoji (including ZWJ sequences) and Devanagari survive.
     """
-    pattern = re.compile(rf"<(\s*/?\s*{re.escape(tag)}\s*>)", re.IGNORECASE)
-    safe = pattern.sub(r"&lt;\1", text)
+    name = _GAP.join(re.escape(ch) for ch in tag)
+    pattern = re.compile(rf"<{_GAP}/?{_GAP}{name}(?![\w-])", re.IGNORECASE)
+    safe = pattern.sub(lambda m: "&lt;" + _FORMAT_RE.sub("", m.group(0)[1:]), text)
     return f"<{tag}>\n{safe}\n</{tag}>"
 
 
@@ -83,7 +96,7 @@ def _record_usage(on_usage: UsageSink, usage: Usage | None) -> None:
 async def intake(
     gw: LLMGateway, pitch: str, meta: dict[str, Any] | None, on_usage: UsageSink = None
 ) -> IntakeResult:
-    user = f"{wrap_untrusted('pitch', pitch)}\n{wrap_untrusted('meta', json.dumps(meta or {}, ensure_ascii=False))}"
+    user = f"{wrap_untrusted('pitch', pitch)}\n{wrap_untrusted('meta', json.dumps(meta or {}, ensure_ascii=False, default=str))}"
     try:
         verdict, usage = await gw.structured("fast", _INTAKE_SYSTEM, user, _IntakeVerdict)
     except LLMRefusal as exc:
@@ -96,9 +109,10 @@ async def intake(
     _record_usage(on_usage, usage)
     if verdict.harmful:
         return IntakeResult(allowed=False, refusal_reason=verdict.reason or DEFAULT_REFUSAL)
-    if not verdict.thin:
+    questions = verdict.questions[:MAX_QUESTIONS] if verdict.thin else []
+    if not questions:  # thin with nothing to ask would leave the client with nothing to answer
         return IntakeResult(allowed=True)
-    return IntakeResult(allowed=True, thin=True, questions=verdict.questions[:MAX_QUESTIONS])
+    return IntakeResult(allowed=True, thin=True, questions=questions)
 
 
 async def is_repeat(
