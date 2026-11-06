@@ -51,7 +51,15 @@ export async function createDebate(body: CreateDebateBody): Promise<CreateDebate
   return { kind: 'created', debateId: data.debate_id, deleteToken: data.delete_token }
 }
 
-export async function getDebate(id: string): Promise<{ verdict?: Verdict | null } & Record<string, unknown>> {
+export interface DebateRecord {
+  id: string
+  pitch: string
+  status: string
+  verdict?: Verdict | null
+  [key: string]: unknown
+}
+
+export async function getDebate(id: string): Promise<DebateRecord> {
   return (await request(`/debates/${encodeURIComponent(id)}`)).json()
 }
 
@@ -72,6 +80,8 @@ const TOKENS_KEY = 'swr.deleteTokens'
 export function getDeleteTokens(): Record<string, string> {
   try { return JSON.parse(localStorage.getItem(TOKENS_KEY) ?? '{}') } catch { return {} }
 }
+
+export const exportUrl = (id: string): string => `${API_BASE}/debates/${encodeURIComponent(id)}/export?format=md`
 
 export function saveDeleteToken(debateId: string, token: string): void {
   localStorage.setItem(TOKENS_KEY, JSON.stringify({ ...getDeleteTokens(), [debateId]: token }))

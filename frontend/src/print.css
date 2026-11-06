@@ -1,0 +1,8 @@
+/* Print / "Save as PDF": hide controls and switch to a light page. */
+@media print {
+  html, body { background: #fff !important; color: #111 !important; }
+  [data-print="hide"] { display: none !important; }
+  main { max-width: none !important; padding: 0 !important; }
+  section, li { break-inside: avoid; }
+  * { color: #111 !important; border-color: #999 !important; background: transparent !important; }
+}
