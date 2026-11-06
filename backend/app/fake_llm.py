@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.config import get_settings
 from app.llm import LLMError, LLMRefusal, Tier, Usage
 
 _VOICES = [
@@ -90,9 +91,12 @@ def _build(schema: dict, defs: dict, name: str = "value") -> Any:
     return None
 
 
-def default_object(schema: type[BaseModel]) -> BaseModel:
+def default_object(schema: type[BaseModel], app_fields: set[str] | None = None) -> BaseModel:
     js = schema.model_json_schema()
-    return schema.model_validate(_build(js, js.get("$defs", {})))
+    data = _build(js, js.get("$defs", {}))
+    for k in app_fields or ():
+        data.pop(k, None)  # let the model's own defaults apply
+    return schema.model_validate(data)
 
 
 class FakeGateway:
@@ -108,13 +112,26 @@ class FakeGateway:
         *,
         fail_on: Matcher = None,
         refuse_on: Matcher = None,
-        delay_s: float = 0.0,
+        delay_s: float | None = None,
+        usage_per_call: tuple[int, int, float] | None = None,
     ) -> None:
         self.script = script
         self.fail_on = fail_on
         self.refuse_on = refuse_on
-        self.delay_s = delay_s
+        self._delay_s = delay_s  # None -> settings.FAKE_DELAY_S, read per call
+        self.usage_per_call = usage_per_call  # (tokens_in, tokens_out, cost_usd)
         self.calls: list[dict[str, Any]] = []
+
+    @property
+    def delay_s(self) -> float:
+        return get_settings().FAKE_DELAY_S if self._delay_s is None else self._delay_s
+
+    def _usage(self, tier: str, system: str, user: str, out: int) -> Usage:
+        if self.usage_per_call:
+            tin, tout, cost = self.usage_per_call
+        else:
+            tin, tout, cost = len((system + " " + user).split()), out, 0.0
+        return Usage(model=f"fake/{tier}", tokens_in=tin, tokens_out=tout, cost_usd=cost, latency_ms=0)
 
     def _gate(self, call: dict[str, Any]) -> None:
         self.calls.append(call)
@@ -135,17 +152,9 @@ class FakeGateway:
             if self.delay_s:
                 await asyncio.sleep(self.delay_s)
             yield piece
-        on_usage(
-            Usage(
-                model=f"fake/{tier}",
-                tokens_in=len((system + " " + user).split()),
-                tokens_out=len(pieces),
-                cost_usd=0.0,
-                latency_ms=0,
-            )
-        )
+        on_usage(self._usage(tier, system, user, len(pieces)))
 
-    async def structured(self, tier: Tier, system: str, user: str, schema: type[Any]):
+    async def structured(self, tier: Tier, system: str, user: str, schema: type[Any], app_fields: set[str] | None = None):
         call = {"kind": "structured", "tier": tier, "system": system, "user": user, "schema": schema}
         self._gate(call)
         if self.delay_s:
@@ -156,12 +165,5 @@ class FakeGateway:
         elif isinstance(scripted, dict):
             obj = schema.model_validate(scripted)
         else:
-            obj = default_object(schema)
-        usage = Usage(
-            model=f"fake/{tier}",
-            tokens_in=len((system + " " + user).split()),
-            tokens_out=10,
-            cost_usd=0.0,
-            latency_ms=0,
-        )
-        return obj, usage
+            obj = default_object(schema, app_fields)
+        return obj, self._usage(tier, system, user, 10)

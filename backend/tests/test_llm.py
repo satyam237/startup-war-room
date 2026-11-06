@@ -26,7 +26,7 @@ class StubClient:
         self.requests.append(kw)
         if self.exc:
             raise self.exc
-        if kw.get("stream"):
+        if kw.get("stream") and not hasattr(self.result, "__aiter__"):
             return self._aiter(self.result)
         return self.result
 
@@ -255,3 +255,118 @@ async def test_fake_failure_injection_and_script():
     assert text == "scripted words"
     obj, _ = await gw.structured("agent", "s", "u", FinalPosition)
     assert obj.score_1_to_10 == 3
+
+
+# ---- fix round 1 ----
+
+USAGE = {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8, "cost": 0.002}
+
+
+async def test_failed_stream_reports_usage_and_logs(caplog):
+    err = {"code": 502, "message": "died"}
+    bad = chunk(None, finish="error", error=err, usage=USAGE)
+    gw = OpenRouterGateway(StubClient([chunk("x"), bad]))
+    seen = []
+    with caplog.at_level(logging.INFO, logger="app.llm"):
+        with pytest.raises(LLMError):
+            async for _ in gw.stream_text("agent", "s", "u", seen.append):
+                pass
+    assert len(seen) == 1 and seen[0].cost_usd == 0.002
+    assert any("llm_call" in r.message and "status=failed" in r.message for r in caplog.records)
+
+
+async def test_refused_stream_and_early_exit_report_usage():
+    gw = OpenRouterGateway(StubClient([chunk("a", usage=USAGE), chunk(None, finish="content_filter")]))
+    seen = []
+    with pytest.raises(LLMRefusal):
+        async for _ in gw.stream_text("agent", "s", "u", seen.append):
+            pass
+    assert len(seen) == 1
+    gw = OpenRouterGateway(StubClient([chunk("a", usage=USAGE), chunk("b"), chunk("c")]))
+    seen = []
+    agen = gw.stream_text("agent", "s", "u", seen.append)
+    async for _ in agen:
+        break
+    await agen.aclose()
+    assert len(seen) == 1
+
+
+async def test_stream_closed_on_early_exit():
+    closed = []
+
+    class S:
+        def __aiter__(self):
+            return self._gen()
+
+        async def _gen(self):
+            yield chunk("a", usage=USAGE)
+            yield chunk("b")
+
+        async def aclose(self):
+            closed.append(True)
+
+    gw = OpenRouterGateway(StubClient(S()))
+    agen = gw.stream_text("agent", "s", "u", lambda u: None)
+    async for _ in agen:
+        break
+    await agen.aclose()
+    assert closed == [True]
+
+
+async def test_structured_failures_carry_usage():
+    cases = [
+        (completion("not json"), LLMError),
+        (completion("{", finish="length"), LLMError),
+        (completion(None, finish="content_filter"), LLMRefusal),
+    ]
+    for resp, exc_type in cases:
+        with pytest.raises(exc_type) as ei:
+            await OpenRouterGateway(StubClient(resp)).structured("agent", "s", "u", FinalPosition)
+        assert ei.value.usage is not None and ei.value.usage.cost_usd == 0.0123
+        assert ei.value.usage.tokens_in == 11
+
+
+async def test_app_fields_excluded_from_schema_and_defaulted():
+    reply = Verdict.model_validate(
+        __import__("app.fake_llm", fromlist=["x"]).default_object(Verdict).model_dump()
+    ).model_dump(exclude={"fallback"})
+    stub = StubClient(completion(json.dumps(reply)))
+    gw = OpenRouterGateway(stub)
+    v, _ = await gw.structured("judge", "s", "u", Verdict, app_fields={"fallback"})
+    sent = stub.requests[0]["response_format"]["json_schema"]["schema"]
+    assert "fallback" not in sent["properties"] and "fallback" not in sent["required"]
+    assert v.fallback is False
+    await gw.structured("judge", "s", "u", Verdict)
+    sent2 = stub.requests[1]["response_format"]["json_schema"]["schema"]
+    assert "fallback" in sent2["properties"]
+
+
+async def test_fake_app_fields_and_usage_per_call():
+    gw = FakeGateway(usage_per_call=(100, 50, 0.25))
+    v, u = await gw.structured("judge", "s", "u", Verdict, app_fields={"fallback"})
+    assert v.fallback is False and (u.tokens_in, u.tokens_out, u.cost_usd) == (100, 50, 0.25)
+    seen = []
+    async for _ in gw.stream_text("agent", "s", "u", seen.append):
+        pass
+    assert seen[0].cost_usd == 0.25
+
+
+def test_get_gateway_cached_and_overridable():
+    from app.llm import set_gateway
+
+    assert get_gateway() is get_gateway()
+    mine = FakeGateway()
+    set_gateway(mine)
+    assert get_gateway() is mine
+    set_gateway(None)
+    assert get_gateway() is not mine
+
+
+async def test_fake_delay_from_settings(monkeypatch):
+    import time
+
+    monkeypatch.setenv("FAKE_DELAY_S", "0.02")
+    get_settings.cache_clear()
+    t = time.monotonic()
+    await collect(FakeGateway())
+    assert time.monotonic() - t >= 0.04

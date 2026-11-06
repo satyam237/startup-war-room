@@ -47,7 +47,9 @@ class Usage(BaseModel):
 
 
 class LLMError(Exception):
-    pass
+    """Gateway failure. `usage` is set when the provider billed tokens before failing."""
+
+    usage: "Usage | None" = None
 
 
 class LLMRefusal(LLMError):
@@ -60,7 +62,8 @@ class LLMGateway(Protocol):
     ) -> AsyncIterator[str]: ...
 
     async def structured(
-        self, tier: Tier, system: str, user: str, schema: type[T]
+        self, tier: Tier, system: str, user: str, schema: type[T],
+        app_fields: set[str] | None = None,
     ) -> tuple[T, Usage]: ...
 
 
@@ -68,8 +71,18 @@ def _model_for(tier: str) -> str:
     return getattr(get_settings(), f"{tier.upper()}_MODEL")
 
 
-def strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Make a Pydantic JSON schema strict-mode friendly: every object closed, all keys required."""
+def strict_json_schema(
+    schema: dict[str, Any], app_fields: set[str] | None = None
+) -> dict[str, Any]:
+    """Make a Pydantic JSON schema strict-mode friendly: every object closed, all keys required.
+
+    Top-level `app_fields` are removed so the model cannot set them; Pydantic defaults apply.
+    """
+    if app_fields:
+        schema = dict(schema)
+        schema["properties"] = {
+            k: v for k, v in schema.get("properties", {}).items() if k not in app_fields
+        }
 
     def walk(node: Any) -> Any:
         if isinstance(node, dict):
@@ -94,11 +107,12 @@ def _extra(obj: Any, key: str) -> Any:
 
 
 def _usage_from(
-    raw: Any, model: str, started: float, tier: str
+    raw: Any, model: str, started: float, tier: str, status: str = "ok"
 ) -> Usage:
     cost = _extra(raw, "cost")
     if cost is None:
-        logger.warning("llm_missing_cost model=%s tier=%s", model, tier)
+        if raw is not None:
+            logger.warning("llm_missing_cost model=%s tier=%s", model, tier)
         cost = 0.0
     usage = Usage(
         model=model,
@@ -108,8 +122,9 @@ def _usage_from(
         latency_ms=int((time.monotonic() - started) * 1000),
     )
     logger.info(
-        "llm_call model=%s tier=%s tokens_in=%d tokens_out=%d cost_usd=%.6f latency_ms=%d",
-        usage.model, tier, usage.tokens_in, usage.tokens_out, usage.cost_usd, usage.latency_ms,
+        "llm_call model=%s tier=%s status=%s tokens_in=%d tokens_out=%d cost_usd=%.6f latency_ms=%d",
+        usage.model, tier, status, usage.tokens_in, usage.tokens_out, usage.cost_usd,
+        usage.latency_ms,
     )
     return usage
 
@@ -168,12 +183,14 @@ class OpenRouterGateway:
         req = self._request(tier, system, user)
         started = time.monotonic()
         raw_usage = None
+        status = "ok"
+        stream = None
         try:
             stream = await self._client.chat.completions.create(stream=True, **req)
             async for chunk in stream:
-                _check_midstream_error(chunk)
                 if getattr(chunk, "usage", None):
                     raw_usage = chunk.usage
+                _check_midstream_error(chunk)
                 for choice in chunk.choices or []:
                     if getattr(choice.delta, "refusal", None):
                         raise LLMRefusal(f"model refused: {choice.delta.refusal}")
@@ -184,13 +201,31 @@ class OpenRouterGateway:
                     if choice.delta.content:
                         yield choice.delta.content
         except LLMError:
+            status = "failed"
+            raise
+        except GeneratorExit:
+            status = "abandoned"
             raise
         except Exception as exc:  # noqa: BLE001 - mapped below
+            status = "failed"
             raise _map_sdk_error(exc) from exc
-        on_usage(_usage_from(raw_usage, req["model"], started, tier))
+        finally:
+            # Paid tokens are reported on every exit path, including errors and early exit.
+            usage = _usage_from(raw_usage, req["model"], started, tier, status)
+            if raw_usage is not None:
+                on_usage(usage)
+            closer = getattr(stream, "aclose", None) or getattr(stream, "close", None)
+            if closer is not None:
+                try:
+                    res = closer()
+                    if hasattr(res, "__await__"):
+                        await res
+                except Exception:  # noqa: BLE001 - best-effort close
+                    logger.debug("llm stream close failed", exc_info=True)
 
     async def structured(
-        self, tier: Tier, system: str, user: str, schema: type[T]
+        self, tier: Tier, system: str, user: str, schema: type[T],
+        app_fields: set[str] | None = None,
     ) -> tuple[T, Usage]:
         req = self._request(tier, system, user)
         req["response_format"] = {
@@ -198,7 +233,7 @@ class OpenRouterGateway:
             "json_schema": {
                 "name": schema.__name__,
                 "strict": True,
-                "schema": strict_json_schema(schema.model_json_schema()),
+                "schema": strict_json_schema(schema.model_json_schema(), app_fields),
             },
         }
         req["extra_body"]["provider"] = {"require_parameters": True}
@@ -212,24 +247,48 @@ class OpenRouterGateway:
             raise LLMError(f"provider error: {err}")
         if not resp.choices:
             raise LLMError("provider returned no choices")
+        usage = _usage_from(resp.usage, req["model"], started, tier)
         choice = resp.choices[0]
+        failure: LLMError | None = None
         if choice.finish_reason == "content_filter" or getattr(choice.message, "refusal", None):
-            raise LLMRefusal(choice.message.refusal or "response blocked by content filter")
-        if choice.finish_reason == "length":
-            raise LLMError("structured output truncated (finish_reason=length)")
-        try:
-            obj = schema.model_validate_json(choice.message.content or "")
-        except ValidationError as exc:
-            raise LLMError(f"structured output failed validation: {exc}") from exc
-        return obj, _usage_from(resp.usage, req["model"], started, tier)
+            failure = LLMRefusal(choice.message.refusal or "response blocked by content filter")
+        elif choice.finish_reason == "length":
+            failure = LLMError("structured output truncated (finish_reason=length)")
+        else:
+            try:
+                return schema.model_validate_json(choice.message.content or ""), usage
+            except ValidationError as exc:
+                failure = LLMError(f"structured output failed validation: {exc}")
+                failure.__cause__ = exc
+        failure.usage = usage
+        raise failure
+
+
+_gateway: LLMGateway | None = None
+_override: LLMGateway | None = None
+_cache_key: str | None = None
+
+
+def set_gateway(gw: LLMGateway | None) -> None:
+    """Test hook: force get_gateway() to return `gw`; None clears the override and the cache."""
+    global _gateway, _override, _cache_key
+    _override, _gateway, _cache_key = gw, None, None
 
 
 def get_gateway() -> LLMGateway:
+    global _gateway, _cache_key
+    if _override is not None:
+        return _override
     provider = get_settings().LLM_PROVIDER
+    if _gateway is not None and _cache_key == provider:
+        return _gateway
     if provider == "fake":
         from app.fake_llm import FakeGateway
 
-        return FakeGateway()
-    if provider == "openrouter":
-        return OpenRouterGateway()
-    raise LLMError(f"unknown LLM_PROVIDER: {provider!r}")
+        gw: LLMGateway = FakeGateway()
+    elif provider == "openrouter":
+        gw = OpenRouterGateway()
+    else:
+        raise LLMError(f"unknown LLM_PROVIDER: {provider!r}")
+    _gateway, _cache_key = gw, provider
+    return gw

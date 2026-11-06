@@ -17,7 +17,11 @@ async def isolated_db(tmp_path, monkeypatch):
     get_settings.cache_clear()
     await db.reset_engine()
     await db.init_db()
+    from app import llm
+
+    llm.set_gateway(None)
     yield
+    llm.set_gateway(None)
     await db.reset_engine()
     get_settings.cache_clear()
 

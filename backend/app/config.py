@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     AGENT_MODEL: str = "openai/gpt-6.1-terra"
     JUDGE_MODEL: str = "openai/gpt-6.1-sol"
     ESCALATION_MODEL: str = "anthropic/claude-opus-5.5"
+    FAKE_DELAY_S: float = 0.0  # per-token delay for the fake provider
     DATABASE_URL: str = "sqlite+aiosqlite:///./warroom.db"
     FRONTEND_ORIGIN: str = "http://localhost:5173"
     MAX_TURNS: int = 14
