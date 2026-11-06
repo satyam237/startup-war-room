@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 from collections import Counter
@@ -150,25 +151,57 @@ def test_runner_stops_early_when_every_debate_fails_the_same_way(tmp_path, capsy
     assert "STOPPED" in capsys.readouterr().out
 
 
-def test_stop_decision_on_spend_and_failure():
+def test_outage_stop_uses_the_last_three_real_causes():
     ok = canned()
-    assert run_evals.stop_reason([ok, ok], spent=4.9, max_spend=5.0) is None
-    assert run_evals.stop_reason([ok], spent=5.0, max_spend=5.0) == "max_spend"
-    # in-flight debates count at the estimate
-    assert run_evals.stop_reason([ok], spent=4.0, max_spend=5.0, inflight=2, estimate=0.5) == "max_spend"
-    assert run_evals.stop_reason([ok], spent=3.9, max_spend=5.0, inflight=2, estimate=0.5) is None
     dead = canned(fallback=True, schema_valid=False, cause="LLMError: 402 Payment Required")
-    assert run_evals.stop_reason([dead] * 3, spent=0.0, max_spend=5.0) == "same_failure"
-    assert run_evals.stop_reason([dead, dead, ok], spent=0.0, max_spend=5.0) is None
+    assert run_evals.outage_stop([dead] * 3) == "same_failure"
+    assert run_evals.outage_stop([dead, dead, ok]) is None
     other = canned(status="crashed", error="ValueError: x", fallback=False, schema_valid=False)
-    assert run_evals.stop_reason([dead, dead, other], spent=0.0, max_spend=5.0) is None
+    assert run_evals.outage_stop([dead, dead, other]) is None
     # successes first, then the key dies: only the last three count
-    assert run_evals.stop_reason([ok] * 7 + [dead] * 3, spent=0.0, max_spend=5.0) == "same_failure"
+    assert run_evals.outage_stop([ok] * 7 + [dead] * 3) == "same_failure"
     # a fallback with no readable cause is not an outage
     unknown = canned(fallback=True, schema_valid=False)
-    assert run_evals.stop_reason([unknown] * 3, spent=0.0, max_spend=5.0) is None
+    assert run_evals.outage_stop([unknown] * 3) is None
     over = canned(status="budget_exceeded", fallback=True, schema_valid=False, cause="LLMError: 402")
-    assert run_evals.stop_reason([over] * 3, spent=0.0, max_spend=5.0) is None
+    assert run_evals.outage_stop([over] * 3) is None
+
+
+def test_fits_counts_the_launching_debate():
+    assert run_evals.fits(spent=0.0, inflight=0, estimate=0.4, max_spend=1.0)
+    assert run_evals.fits(spent=0.0, inflight=1, estimate=0.4, max_spend=1.0)
+    assert not run_evals.fits(spent=0.0, inflight=2, estimate=0.4, max_spend=1.0)  # 3 * 0.4 > 1.0
+    assert not run_evals.fits(spent=0.7, inflight=0, estimate=0.4, max_spend=1.0)
+
+
+def test_unrecovered_cause_only_when_the_debate_fell_back():
+    item = {"id": "p", "category": "strong"}
+    ok = {"status": "complete", "budget": {}, "verdict": None}
+    rec = run_evals.build_record(item, [], ok, None, 1.0, 14, ["LLMError: 429 transient"])
+    assert rec["cause"] is None  # a complete, non-fallback debate has no outage cause
+    fell = {"status": "complete", "budget": {}, "verdict": {"fallback": True}}
+    rec = run_evals.build_record(item, [], fell, None, 1.0, 14, ["LLMError: 429", "LLMError: 402"])
+    assert rec["cause"] == "LLMError: 402"  # the last, not the first
+
+
+async def test_recorder_forgets_errors_that_a_later_call_recovered():
+    causes = []
+
+    class Flaky:
+        n = 0
+
+        async def structured(self, *a, **k):
+            Flaky.n += 1
+            if Flaky.n == 1:
+                raise LLMError("429 rate limited")
+            return "ok"
+
+    gw = run_evals._RecordingGateway(Flaky(), causes)
+    with pytest.raises(LLMError):
+        await gw.structured()
+    assert causes == ["LLMError: 429 rate limited"]
+    assert await gw.structured() == "ok"
+    assert causes == []
 
 
 def test_three_identical_budget_exceeded_debates_do_not_stop(tmp_path, monkeypatch):
@@ -201,36 +234,52 @@ def test_mid_run_outage_after_successes_stops(tmp_path, monkeypatch):
     assert "402" in data["results"][-1]["cause"]
 
 
-class CostlyGateway:
-    """The fake gateway, billing a fixed cost per call and yielding so debates overlap."""
+def fake_debates(monkeypatch, costs, sleeps, start_estimate):
+    """Replace run_one with canned records so costs are exact."""
+    monkeypatch.setattr(run_evals, "START_ESTIMATE_USD", start_estimate)
 
-    def __init__(self):
-        from app.fake_llm import FakeGateway
+    async def run_one(item):
+        i = int(item["id"])
+        await asyncio.sleep(sleeps(i))
+        return canned(id=item["id"], category="strong", cost_usd=costs(i))
 
-        self._gw = FakeGateway(usage_per_call=(10, 10, 0.01), delay_s=0.0005)
-
-    def stream_text(self, *a, **k):
-        return self._gw.stream_text(*a, **k)
-
-    async def structured(self, *a, **k):
-        return await self._gw.structured(*a, **k)
+    monkeypatch.setattr(run_evals, "run_one", run_one)
+    return [{"id": str(i), "category": "strong", "pitch": "p"} for i in range(60)]
 
 
-def test_concurrency_cannot_overshoot_max_spend(tmp_path):
-    llm.set_gateway(CostlyGateway())
+def test_spend_stays_within_the_cap_when_cost_is_constant(tmp_path, monkeypatch):
+    items = fake_debates(monkeypatch, lambda i: 0.4, lambda i: 0.01, start_estimate=0.4)
     out = tmp_path / "r.json"
-    cap = 1.0
-    assert run_evals.main(["--concurrency", "3", "--max-spend", str(cap), "--out", str(out)]) == 0
-    data = json.loads(out.read_text())
-    costs = [r["cost_usd"] for r in data["results"]]
-    assert costs and min(costs) > 0
-    assert data["meta"]["stop_reason"] == "max_spend" and len(costs) < 20
-    # the bound: a ceiling plus at most one debate's cost
-    assert sum(costs) <= cap + max(costs)
+    doc = asyncio.run(run_evals.run_all(items, 3, 1.0, out, "test-provider"))
+    spent = sum(r["cost_usd"] for r in doc["results"])
+    assert doc["meta"]["stop_reason"] == "max_spend"
+    assert spent <= 1.0  # the launching debate is counted, so no overshoot at all
+    assert len(doc["results"]) == 2
 
 
-def test_max_spend_stops_cleanly(tmp_path):
+def test_no_false_stop_while_running_debates_may_still_leave_room(tmp_path, monkeypatch):
+    # The costly debate finishes first and lifts the estimate to 2.0 while two cheap ones run.
+    items = fake_debates(
+        monkeypatch, lambda i: 2.0 if i == 0 else 0.125, lambda i: 0.01 if i == 0 else 0.05, start_estimate=0.5
+    )
     out = tmp_path / "r.json"
-    assert run_evals.main(["--max-spend", "0", "--out", str(out)]) == 0
-    data = json.loads(out.read_text())
-    assert data["meta"]["status"] == "stopped" and data["meta"]["stop_reason"] == "max_spend"
+    doc = asyncio.run(run_evals.run_all(items, 3, 5.0, out, "test-provider"))
+    spent = sum(r["cost_usd"] for r in doc["results"])
+    assert doc["meta"]["stop_reason"] == "max_spend"
+    assert len(doc["results"]) >= 10  # it kept going while more debates fit
+    assert spent <= 5.0 and spent + 2.0 > 5.0  # and stopped only when the next one truly would not fit
+    detail = doc["meta"]["stop_detail"]
+    assert f"${spent:.4f}" in detail and "$2.0000" in detail and "reached" not in detail
+
+
+def test_max_spend_zero_stops_before_the_first_debate(tmp_path, monkeypatch):
+    items = fake_debates(monkeypatch, lambda i: 0.1, lambda i: 0.0, start_estimate=0.5)
+    doc = asyncio.run(run_evals.run_all(items, 3, 0.0, tmp_path / "r.json", "test-provider"))
+    assert doc["results"] == [] and doc["meta"]["stop_reason"] == "max_spend"
+    assert doc["meta"]["status"] == "stopped"
+
+
+def test_fake_provider_has_no_spend_estimate(tmp_path):
+    out = tmp_path / "r.json"
+    assert run_evals.main(["--limit", "2", "--max-spend", "0", "--out", str(out)]) == 0
+    assert len(json.loads(out.read_text())["results"]) == 2  # zero cost, so nothing to hold back
