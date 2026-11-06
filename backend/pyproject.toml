@@ -8,7 +8,7 @@ dependencies = [
     "uvicorn[standard]",
     "pydantic",
     "pydantic-settings",
-    "anthropic",
+    "openai",
     "langgraph",
     "sse-starlette",
     "sqlalchemy[asyncio]",
