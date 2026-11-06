@@ -59,6 +59,38 @@ describe('debateReducer', () => {
     expect(s.status).toBe('complete')
   })
 
+  it('turn_end for an unseen turn_id creates the finished turn', () => {
+    const s = run([{ type: 'turn_end', seq: 1, data: { turn_id: 'z', agent: 'cto', round: 2, text: 'done', final_position: 'no' } }])
+    expect(s.order).toEqual(['z'])
+    expect(s.turns.z).toMatchObject({ agent: 'cto', round: 2, text: 'done', status: 'done', finalPosition: 'no' })
+  })
+
+  it('turn_token for an unseen turn_id is ignored', () => {
+    const s = run([tok(1, 'orphan', 'ghost')])
+    expect(s.turns).toEqual({})
+    expect(s.order).toEqual([])
+    expect(s.lastSeq).toBe(1)
+  })
+
+  it('a token arriving after turn_end does not change the finished text', () => {
+    const s = run([start(1), { type: 'turn_end', seq: 2, data: { turn_id: 't1', agent: 'vc', round: 1, text: 'final' } }, tok(3, 'late')])
+    expect(s.turns.t1.text).toBe('final')
+    expect(s.turns.t1.status).toBe('done')
+  })
+
+  it('events with seq undefined are applied and never advance lastSeq', () => {
+    const s = run([{ ...start(1), seq: undefined }, { ...tok(2, 'a'), seq: undefined }, { ...tok(3, 'b'), seq: undefined }])
+    expect(s.turns.t1.text).toBe('ab')
+    expect(s.lastSeq).toBe(0)
+  })
+
+  it('a repeated turn_start with attempt 2 resets text without duplicating the turn', () => {
+    const s = run([start(1), tok(2, 'first try'),
+      { type: 'turn_start', seq: 3, data: { turn_id: 't1', agent: 'vc', round: 1, attempt: 2 } }, tok(4, 'second')])
+    expect(s.order).toEqual(['t1'])
+    expect(s.turns.t1).toMatchObject({ attempt: 2, text: 'second', status: 'streaming' })
+  })
+
   it('await_rebuttal opens the window', () => {
     const s = run([{ type: 'await_rebuttal', seq: 1, data: { timeout_s: 45 } }])
     expect(s.awaitingRebuttal).toEqual({ timeout_s: 45 })
