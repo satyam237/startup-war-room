@@ -12,7 +12,7 @@ export default function ModeratorBanner({ state }: { state: DebateState }) {
         <>
           <p className="mt-1 font-body leading-snug">{cp.summary}</p>
           <ul className="mt-2 space-y-1 text-sm text-muted">
-            {cp.top_disagreements.map((d) => <li key={d}>{d}</li>)}
+            {cp.top_disagreements.map((d, i) => <li key={i}>{d}</li>)}
           </ul>
         </>
       ) : (

@@ -173,7 +173,7 @@ export default function Pitch() {
           <fieldset className="space-y-4 rounded-sm border border-moderator/60 bg-panel p-4" data-agent="moderator">
             <legend className="px-2 font-semibold text-(--agent)">The moderator needs two more answers</legend>
             {questions.map((q, i) => (
-              <div key={q}>
+              <div key={i}>
                 <label htmlFor={`q${i}`} className="mb-1 block">{q}</label>
                 <input
                   id={`q${i}`}

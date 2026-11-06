@@ -8,6 +8,7 @@ class MockEventSource {
   static instances: MockEventSource[] = []
   listeners: Record<string, ((e: MessageEvent) => void)[]> = {}
   closed = false
+  readyState = 1
   constructor(public url: string) { MockEventSource.instances.push(this) }
   addEventListener(name: string, fn: (e: MessageEvent) => void) { (this.listeners[name] ??= []).push(fn) }
   close() { this.closed = true }
@@ -175,6 +176,30 @@ describe('DebateRoom', () => {
     fetchMock.mockImplementation(() => json(200, { status: 'complete', verdict: { overall: 1 } }))
     setup()
     expect(await screen.findByText('verdict page')).toBeInTheDocument()
+  })
+
+  it('after the browser gives up on the stream, goes to the verdict if the debate finished', async () => {
+    setup()
+    await connected()
+    fetchMock.mockImplementation(() => json(200, { status: 'complete', verdict: { overall: 1 } }))
+    act(() => {
+      const es = MockEventSource.instances.at(-1)!
+      es.readyState = 2
+      es.listeners.error?.forEach((fn) => fn(new Event('error') as MessageEvent))
+    })
+    expect(await screen.findByText('verdict page')).toBeInTheDocument()
+  })
+
+  it('after the browser gives up on the stream, shows an unrecoverable error with a link home', async () => {
+    setup()
+    await connected()
+    act(() => {
+      const es = MockEventSource.instances.at(-1)!
+      es.readyState = 2
+      es.listeners.error?.forEach((fn) => fn(new Event('error') as MessageEvent))
+    })
+    expect(await screen.findByRole('alert')).toHaveTextContent(/connection to this debate was lost/i)
+    expect(screen.getByRole('link', { name: /start a new debate/i })).toHaveAttribute('href', '/')
   })
 
   it('closes the stream on unmount', async () => {

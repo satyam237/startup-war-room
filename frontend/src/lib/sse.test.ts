@@ -6,9 +6,10 @@ class FakeES {
   static last: FakeES
   listeners: Record<string, ((e: unknown) => void)[]> = {}
   closed = false
+  readyState = 1
   constructor(public url: string) { FakeES.last = this }
   addEventListener(n: string, f: (e: unknown) => void) { (this.listeners[n] ??= []).push(f) }
-  close() { this.closed = true }
+  close() { this.closed = true; this.readyState = 2 }
   emit(n: string, e: unknown) { this.listeners[n]?.forEach((f) => f(e)) }
 }
 
@@ -42,5 +43,23 @@ describe('connectDebate', () => {
     const close = connectDebate('abc', () => {})
     close()
     expect(FakeES.last.closed).toBe(true)
+  })
+
+  it('calls onClosed when a transport error leaves the stream CLOSED, not when it is retrying', () => {
+    const onClosed = vi.fn()
+    connectDebate('abc', () => {}, onClosed)
+    FakeES.last.emit('error', new Event('error')) // readyState 1: the browser is reconnecting
+    expect(onClosed).not.toHaveBeenCalled()
+    FakeES.last.readyState = 2 // a 503 during a restart: no more retries
+    FakeES.last.emit('error', new Event('error'))
+    expect(onClosed).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not call onClosed after the caller cleaned up', () => {
+    const onClosed = vi.fn()
+    const close = connectDebate('abc', () => {}, onClosed)
+    close()
+    FakeES.last.emit('error', new Event('error'))
+    expect(onClosed).not.toHaveBeenCalled()
   })
 })
