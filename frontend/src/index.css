@@ -54,3 +54,14 @@
 @media (prefers-reduced-motion: reduce) {
   .seat { animation: none; }
 }
+
+/* Streaming cursor and the speaking indicator; both are state feedback, so they stop under reduced motion. */
+@keyframes blink { 50% { opacity: 0; } }
+.caret {
+  display: inline-block; width: 0.5ch; height: 1em; margin-left: 2px;
+  vertical-align: text-bottom; background: var(--agent); animation: blink 1s steps(1) infinite;
+}
+.speaking-dot { animation: blink 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .caret, .speaking-dot { animation: none; }
+}
