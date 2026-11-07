@@ -1,14 +1,19 @@
 """Export, feedback, delete, rate limits and CORS."""
 
+import asyncio
+from collections import Counter
+
 import httpx
 import pytest
 
-from app import db
+from app import db, llm
+from app.config import get_settings
 from app.export import DISCLAIMER, render_markdown
 from app.fake_llm import FakeGateway
 from app.main import app
 from app.models import Verdict
 from app.ratelimit import RateLimiter
+from app.runner import RunnerFull
 from tests.test_api_stream import BODY, PITCH, create, install, runner, thin_intake, wait_finished
 
 VERDICT = Verdict.model_validate({
@@ -245,6 +250,69 @@ async def test_sixth_create_429_per_ip(client):
     assert len(gateway.calls) == calls  # refused before any paid call
 
 
+async def test_concurrent_creates_cannot_pass_the_debate_limit(client):
+    gateway = install(FakeGateway(delay_s=0.02))
+    use_limits(5)
+    replies = await asyncio.gather(*(client.post("/debates", json=BODY) for _ in range(9)))
+    assert Counter(r.status_code for r in replies) == {201: 5, 429: 4}
+    assert sum(1 for c in gateway.calls if "You screen startup pitches" in c["system"]) == 5
+
+
+async def test_concurrent_clarifications_stay_free(client):
+    install(FakeGateway(thin_intake, delay_s=0.02))
+    use_limits(2)
+    replies = await asyncio.gather(*(client.post("/debates", json={"pitch": PITCH}) for _ in range(2)))
+    assert [r.status_code for r in replies] == [200, 200]
+    assert app.state.create_limiter.tracked() == 0
+
+
+async def test_slot_is_released_when_the_debate_does_not_start(client, monkeypatch):
+    install(FakeGateway())
+    use_limits(1)
+
+    def full(*_a, **_k):
+        raise RunnerFull
+
+    with monkeypatch.context() as patched:
+        patched.setattr(app.state.runner, "start", full)
+        assert (await client.post("/debates", json=BODY)).status_code == 503
+    await create(client)
+
+
+async def test_slot_is_released_when_a_request_crashes(client, monkeypatch):
+    install(FakeGateway())
+    use_limits(1)
+
+    async def broken(*_a, **_k):
+        raise RuntimeError("database is down")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(db, "create_debate", broken)
+        with pytest.raises(RuntimeError):
+            await client.post("/debates", json=BODY)
+    await create(client)
+
+
+async def test_slot_is_released_when_the_provider_refuses_intake(client):
+    install(FakeGateway(unavailable_on=lambda _: True))
+    use_limits(1)
+    assert (await client.post("/debates", json=BODY)).status_code == 503
+    assert app.state.create_limiter.tracked() == 0
+
+
+async def test_no_api_key_is_a_json_503_with_cors_headers(client, monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    get_settings.cache_clear()
+    llm.set_gateway(None)
+    use_limits(1, 1)
+    origin = get_settings().FRONTEND_ORIGIN
+    r = await client.post("/debates", json=BODY, headers={"Origin": origin})
+    assert r.status_code == 503
+    assert "not configured" in r.json()["detail"]
+    assert r.headers["access-control-allow-origin"] == origin
+    assert app.state.create_limiter.tracked() == 0 and app.state.intake_limiter.tracked() == 0
+
+
 async def test_other_ip_not_limited(client):
     install(FakeGateway())
     use_limits(1)
@@ -357,6 +425,16 @@ def test_limiter_allowed_is_read_only_and_window_expires():
     assert not lim.allowed("a") and lim.allowed("b")
     now[0] = 10.5
     assert lim.allowed("a")
+
+
+def test_limiter_release_gives_a_slot_back():
+    limiter = RateLimiter(1, 60)
+    limiter.record("a")
+    assert not limiter.allowed("a")
+    limiter.release("a")
+    assert limiter.allowed("a") and limiter.tracked() == 0
+    limiter.release("a")  # nothing to give back
+    assert limiter.tracked() == 0
 
 
 def test_limiter_check_combines_allowed_and_record():

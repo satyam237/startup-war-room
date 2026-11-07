@@ -18,7 +18,7 @@ from app.config import get_settings
 from app.events import Event
 from app.export import render_markdown
 from app.guards import IntakeResult, intake
-from app.llm import LLMUnavailable, Usage, get_gateway
+from app.llm import LLMError, LLMUnavailable, Usage, get_gateway
 from app.ratelimit import client_ip
 from app.runner import FAILED_MESSAGE, DebateRunner, RebuttalNotOpen, RunnerFull
 
@@ -34,6 +34,7 @@ PING_S = 15
 INTAKE_TIMEOUT_S = 20
 CLIENT_CLOSED_REQUEST = 499
 AT_CAPACITY = "The war room is at capacity. Try again in a minute."
+NOT_CONFIGURED = "The war room is not configured to reach its AI provider yet."
 PROVIDER_DOWN = "The war room cannot reach its AI provider right now. Try again later."
 TOO_MANY = "Too many requests from this address. Try again later."
 MAX_COMMENT_CHARS = 2000
@@ -74,42 +75,55 @@ async def create_debate(body: CreateDebate, request: Request) -> dict[str, str] 
     if runner.at_capacity():  # before intake, so a refused request spends nothing
         raise HTTPException(503, AT_CAPACITY)
 
+    try:
+        gateway = get_gateway()
+    except LLMError as exc:  # a missing key or provider; a bare 500 would carry no CORS headers
+        logger.error("no LLM gateway: %s", exc)
+        raise HTTPException(503, NOT_CONFIGURED) from None
+
     ip = client_ip(request, get_settings().TRUSTED_PROXY_HOPS)
     create_limiter, intake_limiter = request.app.state.create_limiter, request.app.state.intake_limiter
     for limiter in (create_limiter, intake_limiter):  # read-only, and before any paid call
         if not limiter.allowed(ip):
             raise HTTPException(429, TOO_MANY, headers={"Retry-After": str(limiter.retry_after_s(ip))})
+    # Both slots are taken before the first await, or concurrent requests all pass the check.
     intake_limiter.record(ip)  # every intake call costs money, so thin and refused pitches count here
+    create_limiter.record(ip)  # only a started debate keeps this one; see the `finally`
 
-    meta = body.model_dump(include={"target_user", "pricing", "stage"}, exclude_none=True)
-    spent: list[Usage] = []
+    started = False
     try:
-        async with asyncio.timeout(INTAKE_TIMEOUT_S):
-            screened = await intake(get_gateway(), pitch, meta, on_usage=spent.append)
-    except TimeoutError:  # fails open, like any other intake failure
-        logger.warning("intake hit its time limit, allowing the pitch")
-        screened = IntakeResult(allowed=True)
-    except LLMUnavailable as exc:
-        logger.error("intake could not run, refusing the pitch: %s", exc)
-        raise HTTPException(503, PROVIDER_DOWN) from None
-    if not screened.allowed:
-        raise HTTPException(422, screened.refusal_reason)
-    if screened.thin and not body.skip_clarify:
-        return JSONResponse({"status": "needs_clarification", "questions": screened.questions})
+        meta = body.model_dump(include={"target_user", "pricing", "stage"}, exclude_none=True)
+        spent: list[Usage] = []
+        try:
+            async with asyncio.timeout(INTAKE_TIMEOUT_S):
+                screened = await intake(gateway, pitch, meta, on_usage=spent.append)
+        except TimeoutError:  # fails open, like any other intake failure
+            logger.warning("intake hit its time limit, allowing the pitch")
+            screened = IntakeResult(allowed=True)
+        except LLMUnavailable as exc:
+            logger.error("intake could not run, refusing the pitch: %s", exc)
+            raise HTTPException(503, PROVIDER_DOWN) from None
+        if not screened.allowed:
+            raise HTTPException(422, screened.refusal_reason)
+        if screened.thin and not body.skip_clarify:
+            return JSONResponse({"status": "needs_clarification", "questions": screened.questions})
 
-    if await request.is_disconnected():  # nobody would ever hold the id or the delete token
-        return Response(status_code=CLIENT_CLOSED_REQUEST)
+        if await request.is_disconnected():  # nobody would ever hold the id or the delete token
+            return Response(status_code=CLIENT_CLOSED_REQUEST)
 
-    debate_id = secrets.token_urlsafe(16)
-    delete_token = secrets.token_urlsafe(32)
-    await db.create_debate(debate_id, pitch, meta, db.hash_token(delete_token))
-    try:
-        runner.start(debate_id, pitch, meta, spent)
-    except RunnerFull:  # other requests took the last slot during the awaits above
-        await db.delete_debate(debate_id)
-        raise HTTPException(503, AT_CAPACITY) from None
-    create_limiter.record(ip)  # only a started debate uses the per-IP debate quota
-    return {"debate_id": debate_id, "delete_token": delete_token}
+        debate_id = secrets.token_urlsafe(16)
+        delete_token = secrets.token_urlsafe(32)
+        await db.create_debate(debate_id, pitch, meta, db.hash_token(delete_token))
+        try:
+            runner.start(debate_id, pitch, meta, spent)
+        except RunnerFull:  # other requests took the last slot during the awaits above
+            await db.delete_debate(debate_id)
+            raise HTTPException(503, AT_CAPACITY) from None
+        started = True
+        return {"debate_id": debate_id, "delete_token": delete_token}
+    finally:
+        if not started:
+            create_limiter.release(ip)
 
 
 @router.get("/debates/{debate_id}")

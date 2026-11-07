@@ -1,7 +1,8 @@
 """Sliding-window rate limiter, per key (the client IP), kept in process memory.
 
 `allowed` only reads and `record` only writes, so a caller can refuse a request before
-doing paid work and count it only once it has earned a slot. In-process like the rest of
+doing paid work. A request that awaits between them could race its neighbours, so one that
+may not earn its slot records first and calls `release` if it did not. In-process like the rest of
 v1 state, which is why the app runs one worker. Expired keys are swept out so memory
 stays bounded by the traffic of one window.
 """
@@ -49,6 +50,14 @@ class RateLimiter:
         now = self._clock()
         self._sweep(now)
         self._hits.setdefault(key, deque()).append(now)
+
+    def release(self, key: str) -> None:
+        """Give back a slot taken by `record`. Does nothing if none is left in the window."""
+        hits = self._live(key, self._clock())
+        if hits is not None:
+            hits.pop()
+            if not hits:
+                del self._hits[key]
 
     def check(self, key: str) -> bool:
         """`allowed` then `record`, for callers with nothing to do in between."""
