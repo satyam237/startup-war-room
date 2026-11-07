@@ -11,17 +11,18 @@ export interface ArenaCues {
 }
 
 /**
- * Decides when the big moments play, from the real stream state only:
- * the versus intro at the first turn, a title when the round number goes up by one,
- * and the bell when a checkpoint arrives. A title never plays over the intro or the bell. A reload mid-debate replays the stream in one burst;
- * those jumps are recognised (more than one step at once) and stay quiet.
+ * Decides when the big moments play, from the real stream state only: the versus intro at the first turn,
+ * a title when a new round begins, and the bell when a checkpoint arrives. A title never plays over the
+ * intro or the bell. Until `caughtUp` (see useCaughtUp) the stream is replaying an earlier part of the
+ * debate, so nothing plays; the counts still move, so nothing fires late for what was replayed.
  */
-export function useArenaCues(state: DebateState, id: string, calm: boolean): ArenaCues {
+export function useArenaCues(state: DebateState, id: string, calm: boolean, caughtUp: boolean): ArenaCues {
   const [versus, setVersus] = useState(false)
   const [titleRound, setTitleRound] = useState<number | null>(null)
   const [bellFlash, setBellFlash] = useState(false)
   const versusUntil = useRef(0)
   const bellUntil = useRef(0)
+  const lastTurns = useRef(0)
   const lastRound = useRef(0)
   const lastCheckpoints = useRef(0)
   const timers = useRef<number[]>([])
@@ -35,8 +36,11 @@ export function useArenaCues(state: DebateState, id: string, calm: boolean): Are
   useEffect(() => () => timers.current.forEach(clearTimeout), [])
   const later = (fn: () => void, ms: number) => { timers.current.push(window.setTimeout(fn, ms)) }
 
+  // The effects below run in this order, so a title decided in the same render already sees the bell.
   useEffect(() => {
-    if (turnCount !== 1) return
+    const prev = lastTurns.current
+    lastTurns.current = turnCount
+    if (!caughtUp || prev !== 0 || turnCount !== 1) return
     const key = `swr.versus.${id}`
     try {
       if (sessionStorage.getItem(key)) return
@@ -46,24 +50,23 @@ export function useArenaCues(state: DebateState, id: string, calm: boolean): Are
     versusUntil.current = Date.now() + VERSUS_MS
     setVersus(true)
     later(() => setVersus(false), VERSUS_MS)
-  }, [turnCount, id, calm])
+  }, [turnCount, id, calm, caughtUp])
 
   useEffect(() => {
     const prev = lastCheckpoints.current
     lastCheckpoints.current = checkpoints
-    if (checkpoints !== prev + 1 || calm) return
+    if (!caughtUp || checkpoints !== prev + 1 || calm) return
     bellUntil.current = Date.now() + BELL_FLASH_MS
     setBellFlash(true)
     clearTimeout(bellTimer.current)
     bellTimer.current = window.setTimeout(() => setBellFlash(false), BELL_FLASH_MS)
     timers.current.push(bellTimer.current)
-  }, [checkpoints, calm])
+  }, [checkpoints, calm, caughtUp])
 
   useEffect(() => {
     const prev = lastRound.current
     lastRound.current = round
-    if (round === 0 || round !== prev + 1) return
-    // Big moments take turns: the title waits for the versus intro and the checkpoint bell.
+    if (!caughtUp || round === 0 || round !== prev + 1) return
     const wait = Math.max(0, versusUntil.current - Date.now(), bellUntil.current - Date.now())
     const show = () => {
       if (lastRound.current !== round) return // a newer round started while this title waited
@@ -74,7 +77,7 @@ export function useArenaCues(state: DebateState, id: string, calm: boolean): Are
     }
     if (wait === 0) show()
     else later(show, wait)
-  }, [round])
+  }, [round, caughtUp])
 
   return { versus, titleRound, bellFlash }
 }

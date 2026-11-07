@@ -23,6 +23,8 @@ let seq = 0
 function emit(name: string, data: unknown) {
   act(() => { MockEventSource.instances.at(-1)!.emit(name, data, ++seq) })
 }
+/** Lets the stream go quiet long enough to count as caught up, as a live debate does between events. */
+const settle = () => act(() => new Promise<void>((r) => setTimeout(r, 450)))
 const start = (turn_id: string, agent: string, round = 1) => emit('turn_start', { turn_id, agent, round, attempt: 1 })
 const end = (turn_id: string, agent: string, text: string, round = 1) => emit('turn_end', { turn_id, agent, round, text })
 
@@ -250,6 +252,7 @@ describe('DebateRoom', () => {
   it('slams a round title when a new round begins, and shows no score before round 3', async () => {
     setup()
     await connected()
+    await settle()
     start('t1', 'vc', 1)
     expect(screen.getByTestId('round-title')).toHaveTextContent(/round\s*1/i)
     end('t1', 'vc', 'One.', 1)
@@ -289,6 +292,7 @@ describe('DebateRoom', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     setup()
     await connected()
+    act(() => { vi.advanceTimersByTime(500) })
     start('t1', 'vc', 1)
     act(() => { vi.advanceTimersByTime(5000) })
     end('t1', 'vc', 'One.', 1)
@@ -298,5 +302,25 @@ describe('DebateRoom', () => {
     expect(screen.queryByTestId('round-title')).not.toBeInTheDocument()
     act(() => { vi.advanceTimersByTime(1600) })
     expect(screen.getByTestId('round-title')).toHaveTextContent(/round\s*2/i)
+  })
+
+  it('replays a reloaded debate quietly, then animates what happens live', async () => {
+    stubMatchMedia(false)
+    setup()
+    await connected()
+    // The replay after a reload: every earlier event in one burst.
+    start('t1', 'vc', 1); end('t1', 'vc', 'One.', 1)
+    emit('checkpoint', { round: 1, summary: 'Pricing is the crux.', top_disagreements: ['a', 'b'] })
+    start('t2', 'cto', 2); end('t2', 'cto', 'Two.', 2)
+    expect(screen.queryByTestId('versus')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('round-title')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('bell-flash')).not.toBeInTheDocument()
+    const log = screen.getByRole('log')
+    expect([...log.querySelectorAll('article')].map((a) => a.dataset.fresh)).toEqual(['false', 'false'])
+
+    await settle()
+    start('t3', 'competitor', 3)
+    expect(screen.getByTestId('round-title')).toHaveTextContent(/round\s*3/i)
+    expect(log.querySelectorAll('article')[2]).toHaveAttribute('data-fresh', 'true')
   })
 })

@@ -86,14 +86,20 @@ function SetupStage({ state, pitch }: { state: DebateState; pitch?: string }) {
 }
 
 /** Central feed. Follows new text until the reader scrolls up, then offers a way back. */
-export default function Transcript({ state, pitch }: { state: DebateState; pitch?: string }) {
+export default function Transcript({ state, pitch, caughtUp = true }: {
+  state: DebateState
+  pitch?: string
+  /** False while the stream is replaying earlier events after a reload; those rows appear without landing. */
+  caughtUp?: boolean
+}) {
   const calm = useCalm()
   const ref = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
   const followedTo = useRef(-1) // where the feed last scrolled itself
   const [away, setAway] = useState(false)
-  // Rows that were already there when this mounted (a reload mid-debate) appear without the landing animation.
-  const restored = useRef(state.feed.length)
+  // Rows that arrive while the stream is still replaying (a reload) appear without the landing animation.
+  const quietRows = useRef(0)
+  if (!caughtUp) quietRows.current = state.feed.length
 
   const size = state.order.reduce((n, id) => n + state.turns[id].text.length, 0)
     + state.setup.length + state.failures.length + state.checkpoints.length
@@ -139,7 +145,7 @@ export default function Transcript({ state, pitch }: { state: DebateState; pitch
           ? <SetupStage state={state} pitch={pitch} />
           : null}
         {state.feed.map((item, i) => {
-          const fresh = i >= restored.current && !calm
+          const fresh = i >= quietRows.current && !calm
           const land = (fromX: number) => ({
             initial: fresh ? { opacity: 0, x: fromX, y: 14, scale: 0.94, rotate: fromX < 0 ? -2 : fromX > 0 ? 2 : 0 } : false,
             animate: { opacity: 1, x: 0, y: 0, scale: 1, rotate: 0 },
@@ -181,6 +187,7 @@ export default function Transcript({ state, pitch }: { state: DebateState; pitch
               key={i}
               data-agent={t.agent}
               data-corner={left ? 'left' : 'right'}
+              data-fresh={fresh}
               {...land(left ? -110 : 110)}
               className={`surface relative ${left ? 'mr-5 sm:mr-14' : 'ml-5 sm:ml-14'}`}
             >

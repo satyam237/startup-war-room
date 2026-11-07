@@ -14,6 +14,7 @@ import BellFlash from './motion/BellFlash'
 import RoundTitle from './motion/RoundTitle'
 import VersusIntro from './motion/VersusIntro'
 import { useCalm } from './motion/useCalm'
+import { useCaughtUp } from './motion/useCaughtUp'
 import { useArenaCues } from './arenaCues'
 import { AGENT_NAME, tonight } from './agentInfo'
 
@@ -39,7 +40,8 @@ export default function DebateView({ id, state, pitch, lost, sendRebuttal }: Pro
   const calm = useCalm()
   const [dismissed, setDismissed] = useState<object | null>(null)
   const [lateNote, setLateNote] = useState<string | null>(null)
-  const cues = useArenaCues(state, id, calm)
+  const caughtUp = useCaughtUp(state.lastSeq)
+  const cues = useArenaCues(state, id, calm, caughtUp)
 
   const turns = useMemo(() => state.order.map((tid) => state.turns[tid]), [state.order, state.turns])
   const activeAgent = [...turns].reverse().find((t) => t.status === 'streaming')?.agent
@@ -128,7 +130,7 @@ export default function DebateView({ id, state, pitch, lost, sendRebuttal }: Pro
         <div className="order-2 grid min-w-0 grid-cols-1 gap-4 lg:order-1 lg:content-start lg:overflow-y-auto lg:p-3">{LEFT.map(seat)}</div>
 
         <div className="order-1 flex h-[62vh] min-h-0 min-w-0 flex-col lg:order-2 lg:h-auto">
-          <Transcript state={state} pitch={pitch} />
+          <Transcript state={state} pitch={pitch} caughtUp={caughtUp} />
           {lateNote && <p role="status" className="px-1 pt-2 text-sm font-semibold text-on-canvas">{lateNote}</p>}
           {showRebuttal && (
             <RebuttalBox
