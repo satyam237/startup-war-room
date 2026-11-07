@@ -20,7 +20,7 @@ interface Props {
 export default function PanelRow({ risks, lit, onLit }: Props) {
   const calm = useCalm()
   return (
-    <div role="group" aria-label="The panel" className="flex flex-wrap gap-3">
+    <div role="group" aria-label="The panel" data-print="hide" className="flex flex-wrap gap-3">
       {PANEL.map((a) => {
         const n = risks.filter((r) => agentOf(r.raised_by) === a).length
         const on = lit === a

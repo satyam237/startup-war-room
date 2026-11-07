@@ -37,4 +37,19 @@ describe('CountUp', () => {
     render(<CountUp value={7} />)
     expect(document.querySelector('[data-score]')).toHaveTextContent('0')
   })
+
+  it('shows the real score when printing, even if the count-up is under way or about to start', () => {
+    render(<CountUp value={7} delay={5} />)
+    act(() => Offscreen.fire()) // the print layout can bring a score on screen
+    expect(document.querySelector('[data-score]')).toHaveTextContent('0')
+    act(() => { window.dispatchEvent(new Event('beforeprint')) })
+    expect(document.querySelector('[data-score]')).toHaveTextContent('7')
+  })
+
+  it('does not start counting once the page is printing', () => {
+    render(<CountUp value={7} />)
+    act(() => { window.dispatchEvent(new Event('beforeprint')) })
+    act(() => Offscreen.fire())
+    expect(document.querySelector('[data-score]')).toHaveTextContent('7')
+  })
 })

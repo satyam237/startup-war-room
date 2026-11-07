@@ -25,23 +25,28 @@ export default function CountUp({ value, delay = 0, className }: Props) {
     if (el && !calm && el.getBoundingClientRect().top < window.innerHeight) el.textContent = '0'
   }, [calm])
 
+  const printing = useRef(false)
+  const run = useRef<ReturnType<typeof animate> | null>(null)
+
   useEffect(() => {
     const el = ref.current
-    if (!el || calm || !seen) return
+    if (!el || calm || !seen || printing.current) return
     el.textContent = '0'
-    const run = animate(0, value, {
+    run.current = animate(0, value, {
       duration: 0.7 + value * 0.07,
       delay,
       ease: [0.16, 1, 0.3, 1],
       onUpdate: (v) => { el.textContent = String(Math.round(v)) },
     })
-    return () => { run.stop(); el.textContent = String(value) }
+    return () => { run.current?.stop(); el.textContent = String(value) }
   }, [calm, seen, value, delay])
 
   useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const settle = () => { el.textContent = String(value) }
+    const settle = () => {
+      printing.current = true
+      run.current?.stop()
+      if (ref.current) ref.current.textContent = String(value)
+    }
     window.addEventListener('beforeprint', settle)
     return () => window.removeEventListener('beforeprint', settle)
   }, [value])
