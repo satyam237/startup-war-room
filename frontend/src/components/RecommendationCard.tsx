@@ -11,7 +11,10 @@ const CALL: Record<Verdict['recommendation'], { label: string; fill: string; ink
 const CONFETTI = ['--color-vc', '--color-customer', '--color-cto', '--color-competitor', '--color-moderator']
 const SLAM = { scale: 3.2, rotate: 12, opacity: 0 }
 
-/** The moderator's ruling on paper. The stamp comes down on it and the sheet jumps. A go also throws confetti. */
+/**
+ * The moderator's ruling on paper. The stamp comes down on it and the sheet jumps. A go also throws confetti.
+ * The sheet clips sideways: before it lands the stamp is three times its size, and must not widen a phone's page.
+ */
 export default function RecommendationCard({ verdict, pitch }: { verdict: Verdict; pitch?: string }) {
   const calm = useCalm()
   const { stamp } = useReveal()
@@ -21,7 +24,7 @@ export default function RecommendationCard({ verdict, pitch }: { verdict: Verdic
   return (
     <m.section
       aria-labelledby="rec"
-      className="surface relative flex flex-col p-5 sm:p-6"
+      className="surface relative flex flex-col overflow-x-clip p-5 sm:p-6"
       animate={landed && !calm ? { y: [0, 7, -3, 1, 0], rotate: [0, -0.5, 0.3, 0] } : undefined}
       transition={{ duration: 0.38, ease: 'easeOut', delay: 0.07 }}
     >
