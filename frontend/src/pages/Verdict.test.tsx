@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import Verdict from './Verdict'
+import { stubMatchMedia } from '../test-utils'
 import type { Verdict as VerdictData } from '../lib/debateReducer'
 
 class RO { observe() {} unobserve() {} disconnect() {} }
@@ -70,6 +71,49 @@ describe('Verdict page', () => {
     expect(items[0]).toHaveTextContent('8')
     expect(items[3]).toHaveTextContent('Easy to copy.')
     expect(screen.getByText(/brainstorming, not professional advice/i)).toBeInTheDocument()
+  })
+
+  it('reaches its final state at once when the visitor prefers reduced motion', async () => {
+    stubMatchMedia(true)
+    fetchMock.mockReturnValue(json(200, debate))
+    setup()
+    await screen.findByRole('heading', { name: /pivot/i })
+    expect(screen.getByRole('main')).toHaveAttribute('data-revealed', 'true')
+    const items = within(screen.getByRole('list', { name: /scores/i })).getAllByRole('listitem')
+    expect(items[0]).toHaveTextContent('8')
+    expect(items[3]).toHaveTextContent('3')
+  })
+
+  it('with motion on, the staged reveal still lands on the same final numbers', async () => {
+    stubMatchMedia(false)
+    fetchMock.mockReturnValue(json(200, debate))
+    setup()
+    await screen.findByRole('heading', { name: /pivot/i })
+    expect(screen.getByRole('main')).toHaveAttribute('data-revealed', 'false')
+    await waitFor(() => expect(screen.getByRole('main')).toHaveAttribute('data-revealed', 'true'), { timeout: 8000 })
+    const items = within(screen.getByRole('list', { name: /scores/i })).getAllByRole('listitem')
+    expect(items.map((li) => li.querySelector('[data-score]')?.textContent)).toEqual(['8', '6', '7', '3', '5'])
+  }, 12000)
+
+  it('hovering a risk lights the agent who raised it, and hovering an agent lights their risks', async () => {
+    fetchMock.mockReturnValue(json(200, debate))
+    setup()
+    const risks = await screen.findByRole('list', { name: 'Risks' })
+    const panel = screen.getByRole('group', { name: /the panel/i })
+    const chip = (a: string) => panel.querySelector(`[data-agent="${a}"]`)!
+    await userEvent.hover(within(risks).getAllByRole('listitem')[2])
+    expect(chip('cto')).toHaveAttribute('data-lit', 'true')
+    expect(chip('vc')).toHaveAttribute('data-lit', 'false')
+    await userEvent.unhover(within(risks).getAllByRole('listitem')[2])
+    expect(chip('cto')).toHaveAttribute('data-lit', 'false')
+    await userEvent.hover(chip('vc').querySelector('button')!)
+    expect(within(risks).getAllByRole('listitem').filter((li) => li.getAttribute('data-lit') === 'true')).toHaveLength(2)
+  })
+
+  it('shows go and no-go as their own stamps', async () => {
+    fetchMock.mockReturnValue(json(200, { ...debate, verdict: { ...verdict, recommendation: 'no_go' } }))
+    setup()
+    expect(await screen.findByRole('heading', { name: /no-go/i })).toBeInTheDocument()
   })
 
   it('lists five risks in rank order with the agent who raised each', async () => {
