@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, deleteDebate, exportUrl, getDebate, getDeleteTokens, type DebateRecord } from '../lib/api'
 import type { Verdict as VerdictData } from '../lib/debateReducer'
@@ -72,18 +72,31 @@ export default function Verdict() {
       </main>
     )
   }
-  return <VerdictBody id={id} debate={debate} verdict={verdict} deleteToken={deleteToken} />
+  return (
+    <VerdictBody
+      id={id}
+      debate={debate}
+      verdict={verdict}
+      deleteToken={deleteToken}
+      exportHref={exportUrl(id)}
+      feedback={<FeedbackBox debateId={id} />}
+    />
+  )
 }
 
 const CALL_FILL = { go: 'var(--color-customer)', pivot: 'var(--color-vc)', no_go: 'var(--color-competitor)' }
 
-/** The verdict page proper. `demo` switches off everything that would call the server. */
-export function VerdictBody({ id, debate, verdict, deleteToken, demo = false }: {
+/**
+ * The verdict page proper. Controls that need the server appear only when the caller supplies them
+ * (export link, feedback, delete token), so this renders anywhere a verdict exists.
+ */
+export function VerdictBody({ id, debate, verdict, deleteToken, exportHref, feedback }: {
   id: string
   debate: DebateRecord
   verdict: VerdictData
   deleteToken?: string
-  demo?: boolean
+  exportHref?: string
+  feedback?: ReactNode
 }) {
   const navigate = useNavigate()
   const [notice, setNotice] = useState<string | null>(null)
@@ -137,12 +150,12 @@ export function VerdictBody({ id, debate, verdict, deleteToken, demo = false }: 
 
         <div className="flex flex-wrap items-center gap-3" data-print="hide">
           <button type="button" className="slab bg-accent px-4 py-2 text-sm text-on-accent" onClick={() => void share()}>Share</button>
-          {!demo && <a className={btn} href={exportUrl(id)} download>Export Markdown</a>}
+          {exportHref && <a className={btn} href={exportHref} download>Export Markdown</a>}
           <button type="button" className={btn} onClick={() => window.print()}>Print or save as PDF</button>
           <button type="button" className={btn} onClick={() => navigate('/', { state: { pitch: debate.pitch } })}>
             Run again with changes
           </button>
-          {deleteToken && !demo && (
+          {deleteToken && (
             <button type="button" className={`${btn} !bg-competitor !text-fill-ink`} onClick={() => void remove()}>Delete debate</button>
           )}
           <span role="status" className="text-sm font-bold">{notice}</span>
@@ -152,7 +165,7 @@ export function VerdictBody({ id, debate, verdict, deleteToken, demo = false }: 
         <Scorecard scorecard={verdict.scorecard} />
         <RiskList risks={verdict.risks} lit={lit} onLit={setLit} />
         <ExperimentList experiments={verdict.experiments} />
-        {!demo && <FeedbackBox debateId={id} />}
+        {feedback}
 
         <p className="border-t-[3px] border-line pt-4 text-sm font-semibold">
           AI critique for brainstorming, not professional advice. Do not rely on it for legal, financial or investment decisions.

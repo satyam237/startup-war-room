@@ -63,7 +63,7 @@ export default function DemoRoom() {
   return (
     <>
       {finished && state.verdict
-        ? <VerdictBody id="demo" debate={record} verdict={state.verdict} demo />
+        ? <VerdictBody id="demo" debate={record} verdict={state.verdict} />
         : <DebateView
             id="demo"
             state={state}
