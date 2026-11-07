@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { animate } from 'motion/react'
 import { useCalm } from './useCalm'
 import { useSeen } from './useSeen'
@@ -7,32 +7,44 @@ interface Props {
   value: number
   /** Seconds to wait once the number is on screen. */
   delay?: number
-  /** Hold at zero until this is true (the reveal clock). */
-  go?: boolean
   className?: string
 }
 
-/** Counts 0 up to `value`. The DOM always ends on the real number; calm visitors get it immediately. */
-export default function CountUp({ value, delay = 0, go = true, className }: Props) {
+/**
+ * Counts 0 up to `value` the first time it is on screen. Until then the page holds the real number,
+ * so a score nobody has scrolled to is still right when printed or read aloud. Calm visitors get the number at once.
+ */
+export default function CountUp({ value, delay = 0, className }: Props) {
   const calm = useCalm()
   const ref = useRef<HTMLSpanElement>(null)
   const seen = useSeen(ref)
-  const text = calm ? String(value) : '0'
+
+  // On screen from the start: begin at zero before the first paint, so the final number never flashes.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el && !calm && el.getBoundingClientRect().top < window.innerHeight) el.textContent = '0'
+  }, [calm])
 
   useEffect(() => {
     const el = ref.current
-    if (!el) return
-    if (calm) { el.textContent = String(value); return }
-    if (!go || !seen) { el.textContent = '0'; return }
+    if (!el || calm || !seen) return
+    el.textContent = '0'
     const run = animate(0, value, {
       duration: 0.7 + value * 0.07,
       delay,
       ease: [0.16, 1, 0.3, 1],
       onUpdate: (v) => { el.textContent = String(Math.round(v)) },
-      onComplete: () => { el.textContent = String(value) },
     })
-    return () => run.stop()
-  }, [calm, go, seen, value, delay])
+    return () => { run.stop(); el.textContent = String(value) }
+  }, [calm, seen, value, delay])
 
-  return <span ref={ref} data-score className={className}>{text}</span>
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const settle = () => { el.textContent = String(value) }
+    window.addEventListener('beforeprint', settle)
+    return () => window.removeEventListener('beforeprint', settle)
+  }, [value])
+
+  return <span ref={ref} data-score className={className}>{value}</span>
 }

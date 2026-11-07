@@ -54,6 +54,7 @@ export function CascadeItem({ index, as = 'li', className = '', children, ...res
   return (
     <Tag
       ref={ref as never}
+      data-cascade
       className={className}
       initial={calm ? false : { opacity: 0, x: -36, rotate: -1.2 }}
       animate={show ? { opacity: 1, x: 0, rotate: 0 } : { opacity: 0, x: -36, rotate: -1.2 }}

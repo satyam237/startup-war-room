@@ -1,0 +1,40 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import { stubMatchMedia } from '../../test-utils'
+import CountUp from './CountUp'
+
+/** An observer that reports nothing until told, like a score further down a page nobody has scrolled. */
+class Offscreen {
+  static fire: () => void = () => {}
+  constructor(private cb: IntersectionObserverCallback) {
+    Offscreen.fire = () => this.cb([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+  }
+  observe() {}
+  disconnect() {}
+}
+
+describe('CountUp', () => {
+  beforeEach(() => {
+    stubMatchMedia(false)
+    vi.stubGlobal('IntersectionObserver', Offscreen)
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: 5000 } as DOMRect)
+  })
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+  it('holds the real score in the page until it is seen, so printing or reading it never shows 0', () => {
+    render(<CountUp value={7} />)
+    expect(screen.getByText('7')).toHaveAttribute('data-score')
+  })
+
+  it('counts from zero once it is seen, and ends on the real score', async () => {
+    render(<CountUp value={7} />)
+    act(() => Offscreen.fire())
+    await vi.waitFor(() => expect(document.querySelector('[data-score]')).toHaveTextContent('7'), { timeout: 3000 })
+  })
+
+  it('starts at zero when it mounts on screen, so the reveal has no flash of the final number', () => {
+    vi.mocked(Element.prototype.getBoundingClientRect).mockReturnValue({ top: 10 } as DOMRect)
+    render(<CountUp value={7} />)
+    expect(document.querySelector('[data-score]')).toHaveTextContent('0')
+  })
+})

@@ -107,7 +107,7 @@ export default function Pitch() {
       </header>
 
       <div className="mt-6 grid gap-10 lg:mt-10 lg:grid-cols-[1.2fr_1fr] lg:items-start lg:gap-12">
-        <section aria-label="The arena">
+        <section aria-label="The arena" className="min-w-0">
           <h1
             aria-label="Four skeptics will take your idea apart."
             className="text-[clamp(3.6rem,11.5vw,9rem)]"

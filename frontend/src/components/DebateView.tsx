@@ -115,10 +115,10 @@ export default function DebateView({ id, state, pitch, lost, sendRebuttal }: Pro
         })}
       </ul>
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[17rem_1fr_17rem]">
-        <div className="order-2 grid gap-4 lg:order-1 lg:content-start lg:overflow-y-auto lg:p-1.5">{LEFT.map(seat)}</div>
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)_18rem]">
+        <div className="order-2 grid min-w-0 grid-cols-1 gap-4 lg:order-1 lg:content-start lg:overflow-y-auto lg:p-3">{LEFT.map(seat)}</div>
 
-        <div className="order-1 flex h-[62vh] min-h-0 flex-col lg:order-2 lg:h-auto">
+        <div className="order-1 flex h-[62vh] min-h-0 min-w-0 flex-col lg:order-2 lg:h-auto">
           <Transcript state={state} />
           {lateNote && <p role="status" className="px-1 pt-2 text-sm font-semibold text-on-canvas">{lateNote}</p>}
           {showRebuttal && (
@@ -132,7 +132,7 @@ export default function DebateView({ id, state, pitch, lost, sendRebuttal }: Pro
           )}
         </div>
 
-        <div className="order-3 grid gap-4 lg:content-start lg:overflow-y-auto lg:p-1.5">{RIGHT.map(seat)}</div>
+        <div className="order-3 grid min-w-0 grid-cols-1 gap-4 lg:content-start lg:overflow-y-auto lg:p-3">{RIGHT.map(seat)}</div>
       </div>
     </main>
   )
