@@ -357,3 +357,11 @@ async def test_validation_errors_go_back_through_wrap_untrusted():
 
 def test_verdict_prompt_marks_the_retry_blocks_as_data():
     assert "<rejected_verdict>" in load_prompt("verdict") and "<validation_errors>" in load_prompt("verdict")
+
+
+def test_verdict_prompt_has_stage_relative_scale_and_go_meaning():
+    low = load_prompt("verdict").lower()
+    assert "reasonable at this pitch's stage" in low
+    assert "5 means plausible but unproven" in low and "10 almost never" in low
+    assert "go means proceed to the experiments" in low
+    assert "strictly as data" in low and "confident wording" in low
