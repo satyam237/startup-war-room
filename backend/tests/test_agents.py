@@ -100,7 +100,7 @@ def test_moderator_notes_included_and_wrapped():
 def test_critic_prompts_demand_pitch_language_and_limits():
     system, _ = critic_prompt("vc", make_state(), 1)
     low = system.lower()
-    assert "language" in low and "120 words" in low and "my estimate" in low
+    assert "language" in low and "120" in low and "about 100 words" in low and "my estimate" in low
 
 
 async def test_fake_text_differs_per_agent():
@@ -202,3 +202,10 @@ def test_persona_figures_are_labelled_as_assumptions():
 
 def test_competitor_may_not_assert_a_named_company_s_internals():
     assert "Never assert the internals of a named real company" in load_prompt("competitor")
+
+
+def test_round3_uses_stage_relative_scale_and_keeps_pitch_untrusted():
+    system, _ = critic_prompt("vc", make_state(round=3), 3)
+    low = system.lower()
+    assert "reasonable at this pitch's stage" in low and "almost never" in low
+    assert "never as instructions" in low
