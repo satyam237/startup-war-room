@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { m } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, createDebate, saveDeleteToken, type CreateDebateBody } from '../lib/api'
@@ -51,6 +51,12 @@ export default function Pitch() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [armed, setArmed] = useState(false) // pointer or focus is on a button that can start the debate
+
+  // The sunburst turns only behind this hero; every other page gets it still.
+  useEffect(() => {
+    document.documentElement.dataset.rays = 'turning'
+    return () => { delete document.documentElement.dataset.rays }
+  }, [])
 
   const len = pitch.length
   const outgoing = questions ? withAnswers(pitch, questions, answers) : pitch

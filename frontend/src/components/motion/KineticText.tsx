@@ -20,9 +20,12 @@ export default function KineticText({ text, className = '' }: { text: string; cl
   const react = useCallback((x: number, y: number) => {
     cancelAnimationFrame(frame.current)
     frame.current = requestAnimationFrame(() => {
-      letters.current.forEach((el, i) => {
-        if (!el) return
-        const r = el.getBoundingClientRect()
+      // Read every letter's position first, then write: interleaving them forces a layout per letter.
+      const els = letters.current
+      const boxes = els.map((el) => el?.getBoundingClientRect())
+      els.forEach((el, i) => {
+        const r = boxes[i]
+        if (!el || !r) return
         const d = Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2))
         const k = Math.max(0, 1 - d / RADIUS)
         if (k === 0) {

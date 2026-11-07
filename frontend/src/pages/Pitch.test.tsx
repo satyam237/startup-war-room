@@ -175,4 +175,14 @@ describe('Pitch', () => {
     setup()
     expect(screen.getByRole('heading', { level: 1 })).toHaveAccessibleName(/four skeptics will take your idea apart/i)
   })
+
+  it('turns the sunburst only while the pitch page is open', async () => {
+    fetchMock.mockReturnValue(json(200, { status: 'created', debate_id: 'abc', delete_token: 't' }))
+    setup()
+    expect(document.documentElement.dataset.rays).toBe('turning')
+    await userEvent.type(box(), 'x'.repeat(60))
+    await userEvent.click(submit())
+    await screen.findByText('debate room')
+    expect(document.documentElement.dataset.rays).toBeUndefined()
+  })
 })

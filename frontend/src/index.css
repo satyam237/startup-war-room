@@ -156,18 +156,24 @@
     overflow-wrap: break-word;
     transition: color 0.35s;
   }
-  /* The poster's sunburst. It turns slowly on its own layer, so it costs one composited transform. */
+  /*
+   * The poster's sunburst: a still print on every page. Only the Pitch hero sets data-rays="turning" on <html>,
+   * and only then does it turn on its own composited layer. 170vmax is the smallest disc that still covers
+   * every corner of the window from its centre (50%, 34%) while it turns.
+   */
   body::before {
     content: "";
     position: fixed;
     left: 50%;
     top: 34%;
     z-index: -1;
-    width: 240vmax;
-    height: 240vmax;
-    margin: -120vmax 0 0 -120vmax;
+    width: 170vmax;
+    height: 170vmax;
+    margin: -85vmax 0 0 -85vmax;
     pointer-events: none;
     background: repeating-conic-gradient(var(--color-canvas-2) 0 7.5deg, transparent 0 15deg);
+  }
+  html[data-rays="turning"] body::before {
     animation: rays-turn 240s linear infinite;
     will-change: transform;
   }
