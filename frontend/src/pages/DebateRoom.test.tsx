@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import DebateRoom from './DebateRoom'
+import { stubMatchMedia } from '../test-utils'
 
 class MockEventSource {
   static instances: MockEventSource[] = []
@@ -281,5 +282,21 @@ describe('DebateRoom', () => {
     expect(box).toHaveAttribute('data-pressure', 'rising')
     act(() => { vi.advanceTimersByTime(7000) })
     expect(box).toHaveAttribute('data-pressure', 'critical')
+  })
+
+  it('holds the round title until the checkpoint bell has finished, so the two never overlap', async () => {
+    stubMatchMedia(false)
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    setup()
+    await connected()
+    start('t1', 'vc', 1)
+    act(() => { vi.advanceTimersByTime(5000) })
+    end('t1', 'vc', 'One.', 1)
+    emit('checkpoint', { round: 1, summary: 'Pricing is the crux.', top_disagreements: ['a', 'b'] })
+    start('t2', 'cto', 2)
+    expect(screen.getByTestId('bell-flash')).toBeInTheDocument()
+    expect(screen.queryByTestId('round-title')).not.toBeInTheDocument()
+    act(() => { vi.advanceTimersByTime(1600) })
+    expect(screen.getByTestId('round-title')).toHaveTextContent(/round\s*2/i)
   })
 })

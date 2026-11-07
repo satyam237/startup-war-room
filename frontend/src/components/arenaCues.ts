@@ -13,7 +13,7 @@ export interface ArenaCues {
 /**
  * Decides when the big moments play, from the real stream state only:
  * the versus intro at the first turn, a title when the round number goes up by one,
- * and the bell when a checkpoint arrives. A reload mid-debate replays the stream in one burst;
+ * and the bell when a checkpoint arrives. A title never plays over the intro or the bell. A reload mid-debate replays the stream in one burst;
  * those jumps are recognised (more than one step at once) and stay quiet.
  */
 export function useArenaCues(state: DebateState, id: string, calm: boolean): ArenaCues {
@@ -21,6 +21,7 @@ export function useArenaCues(state: DebateState, id: string, calm: boolean): Are
   const [titleRound, setTitleRound] = useState<number | null>(null)
   const [bellFlash, setBellFlash] = useState(false)
   const versusUntil = useRef(0)
+  const bellUntil = useRef(0)
   const lastRound = useRef(0)
   const lastCheckpoints = useRef(0)
   const timers = useRef<number[]>([])
@@ -48,10 +49,22 @@ export function useArenaCues(state: DebateState, id: string, calm: boolean): Are
   }, [turnCount, id, calm])
 
   useEffect(() => {
+    const prev = lastCheckpoints.current
+    lastCheckpoints.current = checkpoints
+    if (checkpoints !== prev + 1 || calm) return
+    bellUntil.current = Date.now() + BELL_FLASH_MS
+    setBellFlash(true)
+    clearTimeout(bellTimer.current)
+    bellTimer.current = window.setTimeout(() => setBellFlash(false), BELL_FLASH_MS)
+    timers.current.push(bellTimer.current)
+  }, [checkpoints, calm])
+
+  useEffect(() => {
     const prev = lastRound.current
     lastRound.current = round
     if (round === 0 || round !== prev + 1) return
-    const wait = Math.max(0, versusUntil.current - Date.now())
+    // Big moments take turns: the title waits for the versus intro and the checkpoint bell.
+    const wait = Math.max(0, versusUntil.current - Date.now(), bellUntil.current - Date.now())
     const show = () => {
       setTitleRound(round)
       clearTimeout(titleTimer.current)
@@ -61,16 +74,6 @@ export function useArenaCues(state: DebateState, id: string, calm: boolean): Are
     if (wait === 0) show()
     else later(show, wait)
   }, [round])
-
-  useEffect(() => {
-    const prev = lastCheckpoints.current
-    lastCheckpoints.current = checkpoints
-    if (checkpoints !== prev + 1 || calm) return
-    setBellFlash(true)
-    clearTimeout(bellTimer.current)
-    bellTimer.current = window.setTimeout(() => setBellFlash(false), BELL_FLASH_MS)
-    timers.current.push(bellTimer.current)
-  }, [checkpoints, calm])
 
   return { versus, titleRound, bellFlash }
 }
