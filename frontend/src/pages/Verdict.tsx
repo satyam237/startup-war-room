@@ -112,9 +112,9 @@ export function VerdictBody({ id, debate, verdict, deleteToken, demo = false }: 
 
   return (
     <RevealProvider value={reveal}>
-      <main data-revealed={reveal.revealed} className="mx-auto max-w-6xl space-y-12 px-5 py-6 sm:py-8">
+      <main data-revealed={reveal.revealed} className="mx-auto max-w-6xl space-y-9 px-5 pb-10 pt-4">
         <header className="flex items-center justify-between gap-4" data-print="hide">
-          <Link to="/" className="display text-2xl underline-offset-4 hover:underline sm:text-3xl">Startup War Room</Link>
+          <Link to="/" className="display whitespace-nowrap text-[1.45rem] underline-offset-4 hover:underline sm:text-3xl">Startup War Room</Link>
           <ThemeSwitcher />
         </header>
 
@@ -130,13 +130,13 @@ export function VerdictBody({ id, debate, verdict, deleteToken, demo = false }: 
           </p>
         )}
 
-        <div className="grid items-stretch gap-6 lg:grid-cols-[1.1fr_1fr]">
-          <RecommendationCard verdict={verdict} />
+        <div className="-mt-4 grid items-stretch gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+          <RecommendationCard verdict={verdict} pitch={debate.pitch} />
           <Radar5 scorecard={verdict.scorecard} call={CALL_FILL[verdict.recommendation] ?? CALL_FILL.pivot} />
         </div>
 
         <div className="flex flex-wrap items-center gap-3" data-print="hide">
-          <button type="button" className={btn} onClick={() => void share()}>Share</button>
+          <button type="button" className="slab bg-accent px-4 py-2 text-sm text-on-accent" onClick={() => void share()}>Share</button>
           {!demo && <a className={btn} href={exportUrl(id)} download>Export Markdown</a>}
           <button type="button" className={btn} onClick={() => window.print()}>Print or save as PDF</button>
           <button type="button" className={btn} onClick={() => navigate('/', { state: { pitch: debate.pitch } })}>

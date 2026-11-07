@@ -38,10 +38,10 @@ export default function PanelRow({ risks, lit, onLit }: Props) {
               onPointerLeave={() => onLit(null)}
               onFocus={() => onLit(a)}
               onBlur={() => onLit(null)}
-              className="surface flex items-center gap-2 !rounded-full py-1.5 pl-1.5 pr-4 text-left transition-colors"
+              className="surface flex items-center gap-2 py-1 pl-1 pr-3.5 text-left transition-colors"
               style={on ? { background: 'var(--agent)', color: 'var(--color-fill-ink)', boxShadow: '5px 5px 0 var(--color-shade)' } : undefined}
             >
-              <span className="grid size-9 place-items-center rounded-full border-[3px] border-line bg-(--agent) text-fill-ink">
+              <span className="grid size-9 place-items-center rounded-sm border-[3px] border-line bg-(--agent) text-fill-ink">
                 <FighterGlyph agent={a} className="size-5" />
               </span>
               <span>
