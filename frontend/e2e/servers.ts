@@ -29,6 +29,8 @@ export function backendEnv(s: Stack): Record<string, string> {
     FRONTEND_ORIGIN: webUrl(s),
     RATE_LIMIT_PER_HOUR: '1000',
     INTAKE_RATE_LIMIT_PER_HOUR: '1000',
+    MAX_TOKENS_PER_DEBATE: '120000',
+    JUDGE_TOKEN_RESERVE: '60000',
     OPENROUTER_API_KEY: '',
   }
 }

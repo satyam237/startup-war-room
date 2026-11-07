@@ -76,3 +76,21 @@ def test_env_example_and_readme_state_the_token_budget():
     assert "MAX_TOKENS_PER_DEBATE=120000" in example and "JUDGE_TOKEN_RESERVE=60000" in example
     readme = (BACKEND_DIR.parent / "README.md").read_text()
     assert "| `MAX_TOKENS_PER_DEBATE` | `120000` |" in readme and "| `JUDGE_TOKEN_RESERVE` | `60000` |" in readme
+
+
+@pytest.mark.parametrize("origin", ["https://war.example/", "https://war.example///", " https://war.example/ "])
+def test_frontend_origin_is_normalised(origin):
+    assert Settings(FRONTEND_ORIGIN=origin).FRONTEND_ORIGIN == "https://war.example"
+
+
+def test_env_example_has_no_duplicate_keys():
+    lines = (BACKEND_DIR.parent / ".env.example").read_text().splitlines()
+    keys = [line.split("=", 1)[0] for line in lines if "=" in line and not line.startswith("#")]
+    assert len(keys) == len(set(keys))
+
+
+def test_readme_deploy_steps_and_delete_token_are_accurate():
+    readme = (BACKEND_DIR.parent / "README.md").read_text()
+    deployment = readme.split("## Deployment")[1].split("## Known limits")[0]
+    assert "TRUSTED_PROXY_HOPS=1" in deployment
+    assert "shown once" not in readme and "localStorage" in readme

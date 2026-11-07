@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     DEBATE_TIMEOUT_S: int = 240
     MAX_CONCURRENT_DEBATES: int = 10
 
+    @field_validator("FRONTEND_ORIGIN")
+    @classmethod
+    def _bare_origin(cls, v: str) -> str:
+        """Browsers send the origin with no trailing slash, and CORS compares it exactly."""
+        return v.strip().rstrip("/")
+
     @field_validator("JUDGE_TOKEN_RESERVE")
     @classmethod
     def _reserve_leaves_turn_budget(cls, v: int, info: ValidationInfo) -> int:
