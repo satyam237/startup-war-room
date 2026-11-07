@@ -66,6 +66,7 @@ export function useArenaCues(state: DebateState, id: string, calm: boolean): Are
     // Big moments take turns: the title waits for the versus intro and the checkpoint bell.
     const wait = Math.max(0, versusUntil.current - Date.now(), bellUntil.current - Date.now())
     const show = () => {
+      if (lastRound.current !== round) return // a newer round started while this title waited
       setTitleRound(round)
       clearTimeout(titleTimer.current)
       titleTimer.current = window.setTimeout(() => setTitleRound(null), ROUND_TITLE_MS)
