@@ -37,7 +37,7 @@ export default function RecommendationCard({ verdict, pitch }: { verdict: Verdic
         <div className="relative inline-block text-[clamp(5rem,20vw,9.5rem)]" style={{ color: call.ink }}>
           {!landed && <div aria-hidden="true" className="stamp-mark absolute inset-0 -rotate-[4deg]" />}
           <m.div
-            className="inline-block"
+            className="stamp-slam inline-block"
             style={{ transformOrigin: '40% 60%' }}
             initial={calm ? false : SLAM}
             animate={landed ? { scale: 1, rotate: -4, opacity: 1 } : SLAM}
