@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { m } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, createDebate, saveDeleteToken, type CreateDebateBody } from '../lib/api'
+import { loadDebateRoom } from '../lib/routes'
 import Bell from '../components/Bell'
 import KineticText from '../components/motion/KineticText'
 import Ropes from '../components/motion/Ropes'
@@ -59,6 +60,7 @@ export default function Pitch() {
 
   async function send(body: CreateDebateBody) {
     setBusy(true)
+    void loadDebateRoom() // ready by the time the server answers, so the hand-off shows no loading screen
     setError(null)
     try {
       const res = await createDebate(body)
