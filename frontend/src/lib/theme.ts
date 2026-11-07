@@ -8,13 +8,13 @@ export interface ThemeInfo {
   id: ThemeId
   label: string
   scheme: 'light' | 'dark'
-  /** Three swatches for the picker: canvas, panel, accent. Display only; the real colours live in the CSS. */
+  /** Three swatches for the picker: canvas, panel, signature. Display only; the real colours live in the CSS. */
   swatch: [string, string, string]
 }
 
 export const THEMES: readonly ThemeInfo[] = [
-  { id: 'ringside', label: 'Ringside', scheme: 'light', swatch: ['#FFD93D', '#FFFFFF', '#15110D'] },
-  { id: 'nightcard', label: 'Night Card', scheme: 'dark', swatch: ['#120D2B', '#1D1740', '#FFE14A'] },
+  { id: 'ringside', label: 'Ringside', scheme: 'light', swatch: ['#FFD93D', '#FFFFFF', '#FF3D6E'] },
+  { id: 'nightcard', label: 'Night Card', scheme: 'dark', swatch: ['#120D2B', '#1D1740', '#7B6CF0'] },
   { id: 'courtside', label: 'Courtside', scheme: 'light', swatch: ['#2457FF', '#FFFFFF', '#FFE14A'] },
   { id: 'bubblegum', label: 'Bubblegum', scheme: 'light', swatch: ['#FF9ED8', '#FFFFFF', '#7B2CFF'] },
 ]

@@ -15,6 +15,15 @@ const DIMENSIONS: { key: keyof ScorecardData; label: string }[] = [
 /** Bar colour by score band, the same colours as the call itself. */
 const tone = (s: number) => (s >= 7 ? 'var(--color-customer)' : s >= 4 ? 'var(--color-vc)' : 'var(--color-competitor)')
 
+/** An axis label, broken on spaces so "Customer pull" fits beside a narrow chart. */
+function RadarTick({ x, y, textAnchor, payload }: { x?: number; y?: number; textAnchor?: 'start' | 'middle' | 'end'; payload?: { value: string } }) {
+  return (
+    <text x={x} y={y} textAnchor={textAnchor} dominantBaseline="middle" fill="var(--color-ink)" fontSize={13} fontWeight={700}>
+      {payload?.value.split(' ').map((word, i) => <tspan key={word} x={x} dy={i ? '1.1em' : 0}>{word}</tspan>)}
+    </text>
+  )
+}
+
 /** The radar and the five numbers, up top so the count-up plays where the visitor is looking. The full list with reasons is <Scorecard>. */
 export function Radar5({ scorecard, call }: { scorecard: ScorecardData; call: string }) {
   const calm = useCalm()
@@ -24,9 +33,9 @@ export function Radar5({ scorecard, call }: { scorecard: ScorecardData; call: st
       {/* Decorative: the score list carries the same values for assistive tech. */}
       <div className="h-64 w-full sm:h-72 lg:h-auto lg:min-h-64 lg:flex-1" aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-          <RadarChart data={data} outerRadius="72%">
+          <RadarChart data={data} outerRadius="64%">
             <PolarGrid className="radar-grid" stroke="var(--color-line)" strokeOpacity={0.45} />
-            <PolarAngleAxis dataKey="label" tick={{ fill: 'var(--color-ink)', fontSize: 13, fontWeight: 700 }} />
+            <PolarAngleAxis dataKey="label" tick={<RadarTick />} />
             <PolarRadiusAxis domain={[0, 10]} tick={false} axisLine={false} />
             <Radar
               dataKey="score"
