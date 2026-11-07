@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Every colour and typeface used by the app is defined here.
+ * Agent colours are exposed as --color-vc, --color-customer, etc. (utilities such as
+ * bg-vc, text-cto, border-competitor), and as a --agent CSS variable via [data-agent].
+ */
+@theme {
+  --color-bunker: #11161b;
+  --color-panel: #1a222a;
+  --color-panel-hi: #222d37;
+  --color-line: #2f3b47;
+  --color-ink: #ece7dc;
+  --color-muted: #93a1ad;
+
+  --color-vc: #f2b544;
+  --color-customer: #4cc9a7;
+  --color-cto: #6c9dff;
+  --color-competitor: #ff5a4f;
+  --color-moderator: #c8a8ff;
+
+  --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Serif", Georgia, serif;
+  --font-ui: "Archivo", system-ui, sans-serif;
+}
+
+@layer base {
+  html { color-scheme: dark; }
+  body {
+    margin: 0;
+    background: var(--color-bunker);
+    color: var(--color-ink);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 3px;
+  }
+}
+
+[data-agent="vc"] { --agent: var(--color-vc); }
+[data-agent="customer"] { --agent: var(--color-customer); }
+[data-agent="cto"] { --agent: var(--color-cto); }
+[data-agent="competitor"] { --agent: var(--color-competitor); }
+[data-agent="moderator"] { --agent: var(--color-moderator); }
+
+/* The one deliberate motion: the five seats light up in sequence once on load. */
+@keyframes seat-on {
+  from { opacity: 0.15; transform: scaleY(0.4); }
+  to { opacity: 1; transform: scaleY(1); }
+}
+.seat { transform-origin: bottom; animation: seat-on 0.5s ease-out backwards; }
+@media (prefers-reduced-motion: reduce) {
+  .seat { animation: none; }
+}
+
+/* Streaming cursor and the speaking indicator; both are state feedback, so they stop under reduced motion. */
+@keyframes blink { 50% { opacity: 0; } }
+.caret {
+  display: inline-block; width: 0.5ch; height: 1em; margin-left: 2px;
+  vertical-align: text-bottom; background: var(--agent); animation: blink 1s steps(1) infinite;
+}
+.speaking-dot { animation: blink 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .caret, .speaking-dot { animation: none; }
+}

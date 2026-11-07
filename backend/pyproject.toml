@@ -1,0 +1,29 @@
+[project]
+name = "startup-war-room-backend"
+version = "0.1.0"
+description = "Startup War Room backend"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "pydantic-settings",
+    "openai",
+    "langgraph",
+    "sse-starlette",
+    "sqlalchemy[asyncio]",
+    "aiosqlite",
+    "asyncpg",
+]
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "httpx"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.uv]
+package = false

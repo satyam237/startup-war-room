@@ -188,7 +188,7 @@ class DebateState(TypedDict):
     final_positions: dict       # agent -> {score, top_risk, change_mind_if}
     verdict: Verdict | None
     budget: {tokens_used, max_tokens, turns_used, max_turns}
-    status: str                 # running | complete | failed | budget_exceeded
+    status: str                 # running | complete | failed | budget_exceeded | partial
 ```
 
 ### Data model (Postgres/SQLite)
