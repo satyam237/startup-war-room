@@ -110,15 +110,17 @@ export default function Pitch() {
   return (
     <main className="mx-auto max-w-7xl px-5 pb-16 pt-4">
       <header className="flex items-center justify-between gap-4">
-        <p className="display whitespace-nowrap text-[1.45rem] sm:text-3xl">Startup War Room</p>
+        <p className="display whitespace-nowrap text-[1.2rem] sm:text-3xl">Startup War Room</p>
         <ThemeSwitcher />
       </header>
 
       <div className="mt-5 grid gap-8 lg:mt-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
         <section aria-label="The arena" className="min-w-0">
+          {/* On wide screens the size follows the column, so the line "will take your" always fits and the
+              headline sets in three lines; 13vh keeps the fighters on screen at laptop heights. */}
           <h1
             aria-label="Four skeptics will take your idea apart."
-            className="text-[clamp(3.4rem,15.5vw,6.9rem)] lg:text-[clamp(5.2rem,8.1vw,7rem)]"
+            className="text-[clamp(3.4rem,15.5vw,6.9rem)] lg:text-[min(calc((min(100vw,80rem)_-_5rem)*0.08),13vh)]"
           >
             <KineticText text="Four skeptics will take your idea apart." className="display misprint block" />
           </h1>

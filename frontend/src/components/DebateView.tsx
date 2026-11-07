@@ -76,7 +76,7 @@ export default function DebateView({ id, state, pitch, lost, sendRebuttal }: Pro
 
       <header className="space-y-2.5">
         <div className="flex items-center justify-between gap-4">
-          <Link to="/" className="display shrink-0 whitespace-nowrap text-[1.45rem] underline-offset-4 hover:underline sm:text-3xl">Startup War Room</Link>
+          <Link to="/" className="display shrink-0 whitespace-nowrap text-[1.2rem] underline-offset-4 hover:underline sm:text-3xl">Startup War Room</Link>
           {pitch && (
             <p className="hidden min-w-0 flex-1 truncate font-body md:block" title={pitch}>
               <span className="mr-1.5 font-ui font-extrabold">In the ring:</span>{pitch}

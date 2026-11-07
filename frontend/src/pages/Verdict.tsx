@@ -127,7 +127,7 @@ export function VerdictBody({ id, debate, verdict, deleteToken, exportHref, feed
     <RevealProvider value={reveal}>
       <main data-revealed={reveal.revealed} className="mx-auto max-w-6xl space-y-9 px-5 pb-10 pt-4">
         <header className="flex items-center justify-between gap-4" data-print="hide">
-          <Link to="/" className="display whitespace-nowrap text-[1.45rem] underline-offset-4 hover:underline sm:text-3xl">Startup War Room</Link>
+          <Link to="/" className="display whitespace-nowrap text-[1.2rem] underline-offset-4 hover:underline sm:text-3xl">Startup War Room</Link>
           <ThemeSwitcher />
         </header>
 
