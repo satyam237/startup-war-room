@@ -18,7 +18,7 @@ const verdict: VerdictData = {
     timing: { score: 5, why: 'Neutral.' },
   },
   risks: [1, 2, 3, 4, 5].map((n) => ({
-    rank: n, risk: `Risk number ${n}`, severity: n < 3 ? 'high' : 'med', raised_by: ['vc', 'customer', 'cto', 'competitor', 'vc'][n - 1],
+    rank: n, risk: `Risk number ${n}`, severity: n < 3 ? 'high' : 'med', raised_by: ['VC', 'Customer', 'CTO', 'Competitor', 'VC'][n - 1],
   })),
   experiments: [1, 2, 3].map((n) => ({
     test: `Experiment ${n}`, timebox_days: n * 5, success_criteria: `Win ${n}`, kill_criteria: `Kill ${n}`,
@@ -169,6 +169,35 @@ describe('Verdict page', () => {
     fetchMock.mockReturnValue(json(200, { ...debate, status: 'partial' }))
     setup()
     expect(await screen.findByText(/partial result/i)).toBeInTheDocument()
+  })
+
+  it('labels risks by agent whatever the case of raised_by', async () => {
+    fetchMock.mockReturnValue(json(200, debate))
+    setup()
+    const risks = await screen.findByRole('list', { name: 'Risks' })
+    expect(within(risks).getAllByText(/raised by investor/i)).toHaveLength(2)
+    expect(within(risks).getByText(/raised by engineer/i)).toBeInTheDocument()
+    expect(within(risks).getByText(/raised by rival/i)).toBeInTheDocument()
+    expect(risks.querySelector('[data-agent="cto"]')).not.toBeNull()
+  })
+
+  it('tells a share link that the debate failed instead of promising a verdict', async () => {
+    fetchMock.mockReturnValue(json(200, { ...debate, status: 'failed', verdict: null }))
+    setup()
+    expect(await screen.findByRole('heading', { name: /this debate failed/i })).toBeInTheDocument()
+    expect(screen.queryByText(/still working/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /start a new debate/i })).toHaveAttribute('href', '/')
+  })
+
+  it('shows its own message when feedback is rate limited', async () => {
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
+      init?.method === 'POST' ? json(429, { detail: 'Too many' }) : json(200, debate))
+    setup()
+    await userEvent.click(await screen.findByRole('radio', { name: '4 of 5' }))
+    await userEvent.click(screen.getByRole('button', { name: /send feedback/i }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/feedback/i)
+    expect(alert).not.toHaveTextContent(/debate limit/i)
   })
 
   it('handles a missing debate', async () => {

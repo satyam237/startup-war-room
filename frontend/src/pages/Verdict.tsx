@@ -51,6 +51,15 @@ export default function Verdict() {
 
   const { debate } = load
   const verdict = debate.verdict
+  if (!verdict && debate.status === 'failed') {
+    return (
+      <main className="mx-auto max-w-3xl px-5 py-16">
+        <h1 className="font-display text-4xl font-black">This debate failed</h1>
+        <p className="mt-3 text-muted">It stopped before the panel could reach a verdict, so there is nothing to show.</p>
+        <Link to="/" className={`${btn} mt-6 inline-block`}>Start a new debate</Link>
+      </main>
+    )
+  }
   if (!verdict) {
     return (
       <main className="mx-auto max-w-3xl px-5 py-16">

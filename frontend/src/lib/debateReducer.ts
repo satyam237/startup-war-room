@@ -56,6 +56,15 @@ export interface Turn {
   finalPosition?: FinalPosition
 }
 
+export interface FailureNote { agent: AgentId; round: number; note: string }
+export interface CheckpointNote { round: number; summary: string; top_disagreements: [string, string] }
+
+/** One row of the transcript. A turn holds its id because its text keeps changing in `turns`. */
+export type FeedItem =
+  | { kind: 'turn'; id: string }
+  | ({ kind: 'failure' } & FailureNote)
+  | ({ kind: 'checkpoint' } & CheckpointNote)
+
 export interface DebateState {
   lastSeq: number
   status: 'connecting' | 'running' | 'complete' | string
@@ -64,8 +73,9 @@ export interface DebateState {
   competitors: unknown
   turns: Record<string, Turn>
   order: string[]
-  failures: { agent: AgentId; round: number; note: string }[]
-  checkpoints: { round: number; summary: string; top_disagreements: [string, string] }[]
+  feed: FeedItem[] // everything the transcript shows, in arrival order
+  failures: FailureNote[]
+  checkpoints: CheckpointNote[]
   awaitingRebuttal: { timeout_s: number } | null
   rebuttal: string | null
   verdict: Verdict | null
@@ -80,6 +90,7 @@ export const initialDebateState: DebateState = {
   competitors: null,
   turns: {},
   order: [],
+  feed: [],
   failures: [],
   checkpoints: [],
   awaitingRebuttal: null,
@@ -113,6 +124,7 @@ export function debateReducer(state: DebateState, action: DebateAction): DebateS
         awaitingRebuttal: null,
         turns: { ...state.turns, [turn_id]: { id: turn_id, agent, round, attempt, text: '', status: 'streaming' } },
         order: prev ? state.order : [...state.order, turn_id],
+        feed: prev ? state.feed : [...state.feed, { kind: 'turn', id: turn_id }],
       }
     }
     case 'turn_token': {
@@ -133,6 +145,7 @@ export function debateReducer(state: DebateState, action: DebateAction): DebateS
         ...state,
         turns: { ...state.turns, [turn_id]: { ...turn, text, status: 'done', finalPosition: final_position } },
         order: state.turns[turn_id] ? state.order : [...state.order, turn_id],
+        feed: state.turns[turn_id] ? state.feed : [...state.feed, { kind: 'turn', id: turn_id }],
       }
     }
     case 'turn_failed': {
@@ -145,10 +158,15 @@ export function debateReducer(state: DebateState, action: DebateAction): DebateS
         ...state,
         turns: open ? { ...state.turns, [open.id]: { ...open, status: 'done' } } : state.turns,
         failures: [...state.failures, action.data],
+        feed: [...state.feed, { kind: 'failure', ...action.data }],
       }
     }
     case 'checkpoint':
-      return { ...state, checkpoints: [...state.checkpoints, action.data] }
+      return {
+        ...state,
+        checkpoints: [...state.checkpoints, action.data],
+        feed: [...state.feed, { kind: 'checkpoint', ...action.data }],
+      }
     case 'await_rebuttal':
       return { ...state, awaitingRebuttal: action.data }
     case 'rebuttal_received':

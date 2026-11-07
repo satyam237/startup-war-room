@@ -99,6 +99,29 @@ describe('Pitch', () => {
     await waitFor(() => expect(submit()).toBeEnabled())
   })
 
+  it('503 shows the reason the server gave', async () => {
+    fetchMock.mockReturnValueOnce(json(503, { detail: 'The war room is not configured to reach its AI provider yet.' }))
+    setup()
+    await enterPitch()
+    await userEvent.click(submit())
+    expect(await screen.findByRole('alert')).toHaveTextContent(/not configured/i)
+  })
+
+  it('503 with no reason falls back to the capacity message', async () => {
+    fetchMock.mockReturnValueOnce(Promise.resolve(new Response('', { status: 503 })))
+    setup()
+    await enterPitch()
+    await userEvent.click(submit())
+    expect(await screen.findByRole('alert')).toHaveTextContent(/at capacity/i)
+  })
+
+  it('limits the optional fields to what the server accepts', () => {
+    setup()
+    for (const label of [/target user/i, /pricing idea/i, /stage/i]) {
+      expect(screen.getByLabelText(label)).toHaveAttribute('maxlength', '200')
+    }
+  })
+
   it('keeps answers whole: blocks resubmit with a message when pitch + answers exceed 2000', async () => {
     fetchMock
       .mockReturnValueOnce(json(200, { status: 'needs_clarification', questions: ['Who pays?'] }))

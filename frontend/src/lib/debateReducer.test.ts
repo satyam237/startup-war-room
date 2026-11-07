@@ -125,4 +125,15 @@ describe('debateReducer', () => {
     expect(s.order).toEqual([])
     expect(s.failures).toEqual([{ agent: 'moderator', round: 1, note: 'no summary' }])
   })
+
+  it('keeps every feed item in arrival order, once', () => {
+    const s = run([
+      start(1, 't1'),
+      { type: 'checkpoint', seq: 2, data: { round: 1, summary: 's', top_disagreements: ['a', 'b'] } },
+      { type: 'turn_failed', seq: 3, data: { agent: 'cto', round: 1, note: 'n' } },
+      { type: 'turn_end', seq: 4, data: { turn_id: 't1', agent: 'vc', round: 1, text: 'done' } },
+      { type: 'turn_end', seq: 5, data: { turn_id: 'unseen', agent: 'vc', round: 2, text: 'late' } },
+    ])
+    expect(s.feed.map((f) => f.kind)).toEqual(['turn', 'checkpoint', 'failure', 'turn'])
+  })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import Transcript from './Transcript'
 import { debateReducer, initialDebateState, type DebateAction } from '../lib/debateReducer'
 
@@ -33,5 +33,55 @@ describe('Transcript', () => {
     const state = run([{ type: 'turn_start', data: { turn_id: 'r1-vc', agent: 'vc', round: 1, attempt: 1 } }])
     render(<Transcript state={state} />)
     expect(screen.getByRole('heading', { level: 3 })).toBeInTheDocument()
+  })
+
+  it('renders turns, failures and checkpoints in arrival order', () => {
+    const state = run([
+      { type: 'turn_end', data: { turn_id: 'r1-vc', agent: 'vc', round: 1, text: 'first turn' } },
+      { type: 'turn_failed', data: { agent: 'customer', round: 1, note: 'second, a failure' } },
+      { type: 'checkpoint', data: { round: 1, summary: 'third, a checkpoint', top_disagreements: ['a', 'b'] } },
+      { type: 'turn_end', data: { turn_id: 'r2-vc', agent: 'vc', round: 2, text: 'fourth turn' } },
+      { type: 'turn_failed', data: { agent: 'moderator', round: 2, note: 'fifth, a failure' } },
+    ])
+    render(<Transcript state={state} />)
+    const feed = screen.getByRole('log').textContent ?? ''
+    const places = ['first turn', 'second, a failure', 'third, a checkpoint', 'fourth turn', 'fifth, a failure']
+      .map((text) => feed.indexOf(text))
+    expect(places.every((p) => p >= 0)).toBe(true)
+    expect(places).toEqual([...places].sort((a, b) => a - b))
+  })
+
+  it('keeps a retried turn in its first place in the feed', () => {
+    const state = run([
+      { type: 'turn_start', data: { turn_id: 'r1-vc', agent: 'vc', round: 1, attempt: 1 } },
+      { type: 'turn_failed', data: { agent: 'moderator', round: 1, note: 'a note' } },
+      { type: 'turn_start', data: { turn_id: 'r1-vc', agent: 'vc', round: 1, attempt: 2 } },
+    ])
+    expect(state.feed).toEqual([{ kind: 'turn', id: 'r1-vc' }, { kind: 'failure', agent: 'moderator', round: 1, note: 'a note' }])
+  })
+
+  it('stops following when the reader scrolls up, and Jump to latest resumes it', () => {
+    const start: DebateAction = { type: 'turn_start', data: { turn_id: 'r1-vc', agent: 'vc', round: 1, attempt: 1 } }
+    const token = (text: string): DebateAction => ({ type: 'turn_token', data: { turn_id: 'r1-vc', text } })
+    const first = run([start, token('one')])
+    const { rerender } = render(<Transcript state={first} />)
+    const log = screen.getByRole('log')
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, value: 1000 })
+    Object.defineProperty(log, 'clientHeight', { configurable: true, value: 300 })
+
+    log.scrollTop = 100 // far from the bottom
+    fireEvent.scroll(log)
+    const button = screen.getByRole('button', { name: /jump to latest/i })
+
+    const second = debateReducer(first, token(' two'))
+    rerender(<Transcript state={second} />)
+    expect(log.scrollTop).toBe(100) // new text did not pull the reader down
+
+    fireEvent.click(button)
+    expect(log.scrollTop).toBe(1000)
+    expect(screen.queryByRole('button', { name: /jump to latest/i })).not.toBeInTheDocument()
+
+    rerender(<Transcript state={debateReducer(second, token(' three'))} />)
+    expect(log.scrollTop).toBe(1000) // following again
   })
 })

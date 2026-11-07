@@ -5,6 +5,7 @@ import { AGENTS } from '../lib/debateReducer'
 
 const MIN = 50
 const MAX = 2000
+const MAX_META_CHARS = 200 // backend/app/routes.py
 
 const SEATS: Record<(typeof AGENTS)[number], string> = {
   vc: 'Investor',
@@ -157,15 +158,15 @@ export default function Pitch() {
         <div className="grid gap-4 sm:grid-cols-3">
           <label className="block text-sm">
             <span className="mb-1 block text-muted">Target user (optional)</span>
-            <input className={field} value={targetUser} onChange={(e) => setTargetUser(e.target.value)} />
+            <input className={field} maxLength={MAX_META_CHARS} value={targetUser} onChange={(e) => setTargetUser(e.target.value)} />
           </label>
           <label className="block text-sm">
             <span className="mb-1 block text-muted">Pricing idea (optional)</span>
-            <input className={field} value={pricing} onChange={(e) => setPricing(e.target.value)} />
+            <input className={field} maxLength={MAX_META_CHARS} value={pricing} onChange={(e) => setPricing(e.target.value)} />
           </label>
           <label className="block text-sm">
             <span className="mb-1 block text-muted">Stage (optional)</span>
-            <input className={field} value={stage} onChange={(e) => setStage(e.target.value)} />
+            <input className={field} maxLength={MAX_META_CHARS} value={stage} onChange={(e) => setStage(e.target.value)} />
           </label>
         </div>
 

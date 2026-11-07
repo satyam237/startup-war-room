@@ -20,12 +20,12 @@ export class ApiError extends Error {
   }
 }
 
-const FRIENDLY: Record<number, string> = {
-  429: 'You have hit the hourly debate limit. Try again in a while.',
-  503: 'The war room is at capacity right now. Try again in a minute.',
-}
+const DEBATE_LIMIT = 'You have hit the hourly debate limit. Try again in a while.'
+const FEEDBACK_LIMIT = 'You have sent a lot of feedback this hour. Try again in a while.'
+const AT_CAPACITY = 'The war room is at capacity right now. Try again in a minute.'
 
-async function request(path: string, init?: RequestInit): Promise<Response> {
+/** `limitMessage` replaces the server's 429 text; other errors use its `detail` when it sent one. */
+async function request(path: string, init?: RequestInit, limitMessage = DEBATE_LIMIT): Promise<Response> {
   const res = await fetch(`${API_BASE}${path}`, init)
   if (res.ok) return res
   let detail = ''
@@ -33,7 +33,9 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
     const body = await res.json()
     if (typeof body?.detail === 'string') detail = body.detail
   } catch { /* non-JSON error body */ }
-  throw new ApiError(res.status, FRIENDLY[res.status] ?? (detail || `Request failed (${res.status}).`))
+  if (res.status === 429) throw new ApiError(429, limitMessage)
+  const fallback = res.status === 503 ? AT_CAPACITY : `Request failed (${res.status}).`
+  throw new ApiError(res.status, detail || fallback)
 }
 
 const jsonInit = (method: string, body: unknown, headers: Record<string, string> = {}): RequestInit => ({
@@ -72,7 +74,7 @@ export async function deleteDebate(id: string, deleteToken: string): Promise<voi
 }
 
 export async function sendFeedback(id: string, rating: number, comment?: string): Promise<void> {
-  await request(`/debates/${encodeURIComponent(id)}/feedback`, jsonInit('POST', { rating, comment }))
+  await request(`/debates/${encodeURIComponent(id)}/feedback`, jsonInit('POST', { rating, comment }), FEEDBACK_LIMIT)
 }
 
 const TOKENS_KEY = 'swr.deleteTokens'

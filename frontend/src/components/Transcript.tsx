@@ -44,12 +44,30 @@ export default function Transcript({ state }: { state: DebateState }) {
         {state.setup.map((s, i) => (
           <p key={i} className="font-body italic text-muted">{s.message}</p>
         ))}
-        {state.order.map((id) => {
-          const t = state.turns[id]
-          // A turn reset and then failed ends with no text; the failure note below says why.
+        {state.feed.map((item, i) => {
+          if (item.kind === 'failure') {
+            return (
+              <p key={i} data-agent={item.agent} className="border-l-4 border-dashed border-(--agent) pl-4 text-sm text-muted">
+                {item.note}
+              </p>
+            )
+          }
+          if (item.kind === 'checkpoint') {
+            return (
+              <div key={i} data-agent="moderator" className="border-y border-line py-3">
+                <p className="font-display text-sm font-bold text-(--agent)">Moderator, end of round {item.round}</p>
+                <p className="mt-1 font-body leading-relaxed">{item.summary}</p>
+                <ul className="mt-2 list-disc pl-5 text-sm text-muted">
+                  {item.top_disagreements.map((d, j) => <li key={j}>{d}</li>)}
+                </ul>
+              </div>
+            )
+          }
+          const t = state.turns[item.id]
+          // A turn reset and then failed ends with no text; its failure note says why.
           if (t.status === 'done' && !t.text.trim()) return null
           return (
-            <article key={id} data-agent={t.agent} className="border-l-4 border-(--agent) pl-4">
+            <article key={i} data-agent={t.agent} className="border-l-4 border-(--agent) pl-4">
               <h3 className="font-display text-sm font-bold text-(--agent)">
                 {AGENT_NAME[t.agent]}
                 <span className="ml-2 font-normal text-muted">Round {t.round}</span>
@@ -61,20 +79,6 @@ export default function Transcript({ state }: { state: DebateState }) {
             </article>
           )
         })}
-        {state.failures.map((f, i) => (
-          <p key={`f${i}`} data-agent={f.agent} className="border-l-4 border-dashed border-(--agent) pl-4 text-sm text-muted">
-            {f.note}
-          </p>
-        ))}
-        {state.checkpoints.map((c) => (
-          <div key={`c${c.round}`} data-agent="moderator" className="border-y border-line py-3">
-            <p className="font-display text-sm font-bold text-(--agent)">Moderator, end of round {c.round}</p>
-            <p className="mt-1 font-body leading-relaxed">{c.summary}</p>
-            <ul className="mt-2 list-disc pl-5 text-sm text-muted">
-              {c.top_disagreements.map((d, i) => <li key={i}>{d}</li>)}
-            </ul>
-          </div>
-        ))}
       </div>
       {away && (
         <button
