@@ -114,10 +114,24 @@ A swapped-in model must accept this app's requests. On OpenRouter's `/models` li
 
 ## Measured results
 
-> Not yet measured. To be filled after the eval run: completion rate, p50 latency, cost per debate. No number appears here until it has been measured.
+Measured on 2026-11-07 over the 20 pitches in `backend/evals/pitches.json`, run directly through the graph with three debates at a time, using `openai/gpt-6.1-terra` and `openai/gpt-6.1-sol`. Latency is inflated by that concurrency.
 
-| Metric | Value | Pitches | Date |
-|---|---|---|---|
-| Completion rate | _pending_ | | |
-| p50 latency | _pending_ | | |
-| Cost per debate | _pending_ | | |
+| Metric | Value |
+|---|---|
+| Completion rate | 100% (20 of 20) |
+| Schema-valid verdicts | 100%, no fallbacks |
+| p50 / p95 latency | 128.5s / 147.4s |
+| Mean cost per debate | $0.085 |
+| Turns regenerated for repetition | 0% |
+| Debates with a turn over 120 words | 3 of 20 |
+
+| Pitch type | Mean score | Verdicts |
+|---|---|---|
+| Strong | 4.8 | 5 pivot |
+| Weak | 4.1 | 3 pivot, 2 no-go |
+| Vague | 3.0 | 2 pivot, 3 no-go |
+| Injection attempts | 4.4 | 5 pivot |
+
+One production browser run took 132s from pitch to verdict. Its first turn appeared after about 15s, slower than the 3-second target, because input checks and the persona run first.
+
+**Known limit:** no pitch in this set reached `go`, so the panel leans strict. Human usefulness ratings have not been collected.
