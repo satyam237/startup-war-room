@@ -136,4 +136,12 @@ describe('debateReducer', () => {
     ])
     expect(s.feed.map((f) => f.kind)).toEqual(['turn', 'checkpoint', 'failure', 'turn'])
   })
+
+  it('clears a recoverable error once the debate moves on, and keeps an unrecoverable one', () => {
+    const start = { type: 'turn_start', data: { turn_id: 't', agent: 'vc', round: 1, attempt: 1 } } as const
+    const hiccup = debateReducer(initialDebateState, { type: 'error', data: { message: 'slow', recoverable: true } })
+    expect(debateReducer(hiccup, start).error).toBeNull()
+    const fatal = debateReducer(initialDebateState, { type: 'error', data: { message: 'lost', recoverable: false } })
+    expect(debateReducer(fatal, start).error?.message).toBe('lost')
+  })
 })

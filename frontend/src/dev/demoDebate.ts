@@ -14,6 +14,17 @@ export interface DemoStep {
 export const DEMO_PITCH =
   'An app that matches freelance electricians with last-minute jobs near them, with instant payouts after each job and a 12 percent fee charged to the homeowner.'
 
+const DEMO_PERSONA = {
+  name: 'Maya Fernandes',
+  role: 'Homeowner with an ageing fuse box',
+  company_context: 'Owns a 1970s house and books trades a few times a year.',
+  budget: 'Up to 300 dollars for an urgent call-out',
+  current_workaround: 'Calls numbers from a neighbourhood group until someone answers',
+  switching_pain: 'None; she has no app to leave',
+  main_hesitation: 'Letting a stranger work on her wiring',
+}
+const DEMO_COMPETITORS = ['Angi', 'Thumbtack', 'TaskRabbit']
+
 type Lines = Record<AgentId, string[]>
 
 /** What each fighter says in rounds 1 to 3 (index 0 to 2). The moderator speaks only through checkpoints. */
@@ -157,10 +168,11 @@ export function demoScript({ kind = 'pivot' }: ScriptOptions = {}): DemoStep[] {
   let t = 0
   const push = (at: number, action: DebateAction) => steps.push({ at, action: { ...action, seq: ++seq } as DebateAction })
 
-  // About 15 seconds of setup in real life; shortened here so a demo does not stall.
-  push(t += 300, { type: 'setup', data: { step: 'persona', message: 'Building your customer persona...' } })
-  push(t += 1400, { type: 'setup', data: { step: 'competitors', message: 'Scouting who already sells this...' } })
-  push(t += 1400, { type: 'setup', data: { step: 'ready', message: 'The panel is ready.' } })
+  // Same order and wording as the server. The long gap is the persona call: about 15 seconds in real life, shortened here.
+  push(t += 300, { type: 'setup', data: { step: 'persona', message: 'Building the customer persona.' } })
+  push(t += 2600, { type: 'setup', data: { step: 'persona', message: 'Customer persona ready.', persona: DEMO_PERSONA } })
+  push(t += 20, { type: 'setup', data: { step: 'competitors', message: 'Competitors identified.', competitors: DEMO_COMPETITORS } })
+  push(t += 20, { type: 'setup', data: { step: 'ready', message: 'The panel is ready.' } })
   t += 900
 
   const order: Exclude<AgentId, 'moderator'>[] = ['vc', 'customer', 'cto', 'competitor']

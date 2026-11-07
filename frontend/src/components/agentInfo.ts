@@ -16,3 +16,14 @@ export const ROLE: Record<AgentId, string> = {
   competitor: 'Why will you lose to us?',
   moderator: 'Keeps the room honest',
 }
+
+/** Tonight's opposition, from the real setup events. Absent until the server has named them. */
+export function tonight(persona: unknown, competitors: unknown): { customer?: string; rival?: string } {
+  const p = persona as { name?: unknown; role?: unknown } | null
+  const who = [p?.name, p?.role].filter((v): v is string => typeof v === 'string' && v.trim() !== '')
+  const rivals = Array.isArray(competitors) ? competitors.filter((c): c is string => typeof c === 'string' && c.trim() !== '') : []
+  return {
+    customer: who.length ? who.join(', ') : undefined,
+    rival: rivals.length ? rivals.join(', ') : undefined,
+  }
+}

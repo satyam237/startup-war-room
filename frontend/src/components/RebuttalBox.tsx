@@ -76,15 +76,15 @@ export default function RebuttalBox({ debateId, timeoutS, onClosed, send: sendRe
         onSubmit={onSubmit}
         data-pressure={pressure}
         data-agent="moderator"
-        className="relative z-40 mt-3"
+        className="z-40 max-lg:fixed max-lg:inset-x-2 max-lg:bottom-2 lg:relative lg:mt-3"
         initial={calm ? false : { y: 60, opacity: 0, scale: 0.92 }}
         animate={{ y: 0, opacity: 1, scale: 1 }}
         transition={{ type: 'spring', stiffness: 380, damping: 20 }}
       >
         <div className="beat surface space-y-3 px-4 pb-4 pt-3" style={{ boxShadow: `6px 6px 0 ${hot}` }}>
           <div className="flex items-center justify-between gap-3">
-            <label htmlFor="rebuttal" className="display text-2xl">Your rebuttal</label>
-            <span role="timer" aria-live="off" className="display rounded-md border-[3px] border-line px-2.5 py-1 text-2xl text-fill-ink transition-colors duration-300" style={{ background: hot }}>
+            <label htmlFor="rebuttal" className="display text-3xl">Your rebuttal</label>
+            <span role="timer" aria-live="off" className="display rounded border-[3px] border-line px-2.5 py-1 text-3xl text-fill-ink transition-colors duration-300" style={{ background: hot }}>
               <span key={left} className="tick-pop inline-block">{left > 0 ? `${left}s left` : 'Time is up'}</span>
             </span>
           </div>
@@ -94,12 +94,12 @@ export default function RebuttalBox({ debateId, timeoutS, onClosed, send: sendRe
               style={{ transform: `scaleX(${timeoutS > 0 ? left / timeoutS : 0})`, background: hot }}
             />
           </div>
-          <p className="text-sm font-semibold text-muted">The room has paused. Answer the sharpest point, or let them carry on.</p>
+          <p className="hidden text-sm font-semibold text-muted sm:block">The room has paused. Answer the sharpest point, or let them carry on.</p>
           <textarea
             id="rebuttal"
             value={text}
             maxLength={MAX}
-            rows={3}
+            rows={2}
             disabled={busy}
             onChange={(e) => setText(e.target.value)}
             className="field font-body"

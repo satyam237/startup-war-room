@@ -2,7 +2,7 @@
  * `/?demo=1` (development only): plays dev/demoDebate.ts through the real reducer and the real screens.
  *   speed=2        play twice as fast
  *   kind=go        verdict variant: pivot (default), go, no_go, partial
- *   at=round2      jump ahead first: round2, checkpoint, rebuttal, verdict
+ *   at=round2      jump ahead first: round2, checkpoint, rebuttal, final, verdict
  */
 import { useEffect, useMemo, useReducer, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -15,6 +15,7 @@ const JUMPS: Record<string, (s: DemoStep) => boolean> = {
   round2: (s) => s.action.type === 'turn_start' && s.action.data.round === 2,
   checkpoint: (s) => s.action.type === 'checkpoint',
   rebuttal: (s) => s.action.type === 'await_rebuttal',
+  final: (s) => s.action.type === 'checkpoint' && s.action.data.round === 3,
   verdict: (s) => s.action.type === 'verdict',
 }
 

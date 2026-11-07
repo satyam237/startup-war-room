@@ -15,7 +15,7 @@ import RoundTitle from './motion/RoundTitle'
 import VersusIntro from './motion/VersusIntro'
 import { useCalm } from './motion/useCalm'
 import { useArenaCues } from './arenaCues'
-import { AGENT_NAME } from './agentInfo'
+import { AGENT_NAME, tonight } from './agentInfo'
 
 const MAX_TURNS = 14
 const LEFT: AgentId[] = ['vc', 'customer']
@@ -46,7 +46,8 @@ export default function DebateView({ id, state, pitch, lost, sendRebuttal }: Pro
   const round = Math.max(0, ...turns.map((t) => t.round), ...state.checkpoints.map((c) => c.round))
   const done = turns.filter((t) => t.status === 'done')
   const progress = Math.min(1, (done.length + state.checkpoints.length) / MAX_TURNS)
-  const doneByRound = [1, 2, 3].map((r) => done.filter((t) => t.round === r).length)
+  const turnsByRound = [1, 2, 3].map((r) => done.filter((t) => t.round === r).map((t) => t.agent))
+  const card = tonight(state.persona, state.competitors)
 
   const ended = state.status !== 'connecting' && state.status !== 'running'
   const stopped = lost !== null || state.error?.recoverable === false || (ended && !FINISHED.includes(state.status))
@@ -59,25 +60,33 @@ export default function DebateView({ id, state, pitch, lost, sendRebuttal }: Pro
       active={activeAgent === agent}
       turns={done.filter((t) => t.agent === agent).length}
       latest={[...turns].reverse().find((t) => t.agent === agent && t.finalPosition)}
+      warming={state.order.length === 0 && !stopped}
+      said={[...done].reverse().find((t) => t.agent === agent)?.text}
+      tonight={agent === 'customer' ? card.customer : agent === 'competitor' ? card.rival : undefined}
     />
   )
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 px-4 py-4 lg:h-screen">
-      <AnimatePresence>{cues.versus && <VersusIntro key="versus" pitch={pitch} />}</AnimatePresence>
+    <main className="mx-auto flex min-h-screen max-w-7xl flex-col gap-3 px-4 py-3 lg:h-screen">
+      <AnimatePresence>{cues.versus && <VersusIntro key="versus" pitch={pitch} tonight={card} />}</AnimatePresence>
       <AnimatePresence>{cues.titleRound !== null && <RoundTitle key={`round${cues.titleRound}`} round={cues.titleRound} calm={calm} />}</AnimatePresence>
       <AnimatePresence>{cues.bellFlash && <BellFlash key="bell" />}</AnimatePresence>
 
-      <header className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <Link to="/" className="display text-2xl underline-offset-4 hover:underline sm:text-3xl">Startup War Room</Link>
+      <header className="space-y-2.5">
+        <div className="flex items-center justify-between gap-4">
+          <Link to="/" className="display shrink-0 whitespace-nowrap text-[1.45rem] underline-offset-4 hover:underline sm:text-3xl">Startup War Room</Link>
+          {pitch && (
+            <p className="hidden min-w-0 flex-1 truncate font-body md:block" title={pitch}>
+              <span className="mr-1.5 font-ui font-extrabold">In the ring:</span>{pitch}
+            </p>
+          )}
           <ThemeSwitcher />
         </div>
         <ModeratorBanner state={state} />
         <RoundIndicator
           round={round}
           progress={progress}
-          doneByRound={doneByRound}
+          turnsByRound={turnsByRound}
           checkpointRounds={state.checkpoints.map((c) => c.round)}
         />
       </header>
@@ -105,7 +114,7 @@ export default function DebateView({ id, state, pitch, lost, sendRebuttal }: Pro
               data-agent={a}
               animate={calm ? undefined : { y: on ? -4 : 0, scale: on ? 1.06 : 1 }}
               transition={{ type: 'spring', stiffness: 420, damping: 18 }}
-              className="surface flex flex-col items-center gap-0.5 !rounded-md px-1 py-1.5 text-fill-ink"
+              className="surface flex flex-col items-center gap-0.5 px-1 py-1 text-fill-ink"
               style={{ background: on ? 'var(--agent)' : undefined, color: on ? undefined : 'var(--color-ink)', boxShadow: on ? '4px 4px 0 var(--color-shade)' : '2px 2px 0 var(--color-shade)' }}
             >
               <FighterGlyph agent={a} className="size-6" />
@@ -119,7 +128,7 @@ export default function DebateView({ id, state, pitch, lost, sendRebuttal }: Pro
         <div className="order-2 grid min-w-0 grid-cols-1 gap-4 lg:order-1 lg:content-start lg:overflow-y-auto lg:p-3">{LEFT.map(seat)}</div>
 
         <div className="order-1 flex h-[62vh] min-h-0 min-w-0 flex-col lg:order-2 lg:h-auto">
-          <Transcript state={state} />
+          <Transcript state={state} pitch={pitch} />
           {lateNote && <p role="status" className="px-1 pt-2 text-sm font-semibold text-on-canvas">{lateNote}</p>}
           {showRebuttal && (
             <RebuttalBox
