@@ -11,7 +11,7 @@ type Mood = 'idle' | 'ready' | 'locked'
 export default function Roster({ mood = 'idle' }: { mood?: Mood }) {
   const calm = useCalm()
   return (
-    <ul aria-label="Who is in the room" className="-mx-5 flex snap-x gap-3 overflow-x-auto px-5 pb-4 pt-3 sm:mx-0 sm:grid sm:grid-cols-5 sm:overflow-visible sm:px-0">
+    <ul aria-label="Who is in the room" className="relative -mx-5 -mt-5 flex snap-x scroll-pl-5 gap-3 overflow-x-auto px-5 pb-3 pt-3 sm:mx-0 sm:grid sm:grid-cols-5 sm:overflow-visible sm:px-0">
       {AGENTS.map((a: AgentId, i) => (
         <m.li
           key={a}
@@ -30,17 +30,17 @@ export default function Roster({ mood = 'idle' }: { mood?: Mood }) {
           whileTap={calm ? undefined : { scale: 0.96 }}
         >
           <div className="surface group h-full overflow-hidden transition-shadow duration-150 hover:shadow-[8px_8px_0_var(--color-shade)]">
-            <div className="grid h-20 place-items-center bg-(--agent) text-fill-ink">
+            <div className={`grid h-16 place-items-center text-fill-ink ${a === 'moderator' ? 'ref-stripes' : 'bg-(--agent)'}`}>
               <m.span
-                className="block"
+                className={`block ${a === 'moderator' ? 'grid size-13 place-items-center rounded-full border-[3px] border-line bg-(--agent)' : ''}`}
                 whileHover={calm ? undefined : { scale: 1.25, rotate: [0, -12, 10, -6, 0], transition: { duration: 0.5 } }}
               >
-                <FighterGlyph agent={a} className="size-11" />
+                <FighterGlyph agent={a} className={a === 'moderator' ? 'size-8' : 'size-11'} />
               </m.span>
             </div>
-            <div className="border-t-[3px] border-line px-3 py-2">
-              <p className="display text-2xl text-(--agent-ink)">{AGENT_NAME[a]}</p>
-              <p className="mt-1 text-xs leading-snug text-muted sm:min-h-[2.2rem]">{ROLE[a]}</p>
+            <div className="border-t-[3px] border-line px-2 py-1.5">
+              <p className="display text-[1.32rem] text-(--agent-ink)">{AGENT_NAME[a]}</p>
+              <p className="mt-0.5 text-xs leading-snug text-muted sm:min-h-[3rem]">{ROLE[a]}</p>
             </div>
           </div>
         </m.li>

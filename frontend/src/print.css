@@ -6,7 +6,7 @@
     --color-ink: #111; --color-muted: #333; --color-on-canvas: #111; --color-on-canvas-muted: #333;
   }
   html, body { background: #fff !important; color: #111 !important; }
-  [data-print="hide"] { display: none !important; }
+  [data-print="hide"], body::before { display: none !important; }
   main { max-width: none !important; padding: 0 !important; }
   section, li { break-inside: avoid; }
   * { color: #111 !important; border-color: #999 !important; background: transparent !important; box-shadow: none !important; animation: none !important; }
@@ -15,5 +15,6 @@
   .radar-grid line, .radar-grid path, .radar-grid polygon { stroke: #999 !important; }
   /* Whatever the staged reveal has not reached yet still prints. */
   [data-cascade] { opacity: 1 !important; transform: none !important; }
-  .stamp { transform: none !important; opacity: 1 !important; border-color: #111 !important; }
+  .stamp { transform: none !important; opacity: 1 !important; border-color: #111 !important; outline-color: #111 !important; }
+  .stamp::after, .stamp-mark { display: none !important; }
 }

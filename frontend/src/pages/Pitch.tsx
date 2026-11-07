@@ -15,11 +15,11 @@ const MAX_META_CHARS = 200 // backend/app/routes.py
 
 const EXAMPLES = [
   {
-    label: 'Electrician marketplace',
+    label: 'Electrician app',
     pitch: 'An app that matches freelance electricians with last-minute jobs near them, with instant payouts after each job and a 12 percent fee charged to the homeowner.',
   },
   {
-    label: 'AI meeting notes for clinics',
+    label: 'AI clinic notes',
     pitch: 'Ambient AI that listens to doctor-patient visits in small clinics, writes the visit note, and files it into the clinic software. Priced at 60 dollars per doctor per month.',
   },
   {
@@ -100,36 +100,36 @@ export default function Pitch() {
   const label = busy ? 'Entering the ring' : questions ? 'Continue to debate' : 'Start the debate'
 
   return (
-    <main className="mx-auto max-w-7xl px-5 pb-20 pt-4 sm:pt-6">
+    <main className="mx-auto max-w-7xl px-5 pb-16 pt-4">
       <header className="flex items-center justify-between gap-4">
-        <p className="display text-2xl sm:text-3xl">Startup War Room</p>
+        <p className="display whitespace-nowrap text-[1.45rem] sm:text-3xl">Startup War Room</p>
         <ThemeSwitcher />
       </header>
 
-      <div className="mt-6 grid gap-10 lg:mt-10 lg:grid-cols-[1.2fr_1fr] lg:items-start lg:gap-12">
+      <div className="mt-5 grid gap-8 lg:mt-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
         <section aria-label="The arena" className="min-w-0">
           <h1
             aria-label="Four skeptics will take your idea apart."
-            className="text-[clamp(3.6rem,11.5vw,9rem)]"
+            className="text-[clamp(3.4rem,15.5vw,6.9rem)] lg:text-[clamp(5.2rem,8.1vw,7rem)]"
           >
-            <KineticText text="Four skeptics will take your idea apart." className="display block" />
+            <KineticText text="Four skeptics will take your idea apart." className="display misprint block" />
           </h1>
-          <p className="mt-6 max-w-xl font-body text-lg leading-relaxed">
+          <p className="mt-5 max-w-xl font-body text-lg leading-relaxed">
             Pitch it in a few sentences. An investor, a customer, an engineer and a rival argue it out
             live, and a moderator hands down a verdict.
           </p>
-          <Ropes className="-my-14 mt-6 py-14" />
+          <Ropes className="mt-4" />
           <Roster mood={mood} />
         </section>
 
-        <form onSubmit={onSubmit} className="surface space-y-5 p-5 sm:p-6 lg:sticky lg:top-6">
+        <form onSubmit={onSubmit} className="surface relative z-10 space-y-4 p-5 lg:sticky lg:top-4" style={{ boxShadow: '8px 8px 0 var(--color-punch)' }}>
           <div>
-            <label htmlFor="pitch" className="mb-2 block text-lg font-extrabold">Your pitch</label>
+            <label htmlFor="pitch" className="display mb-2 block text-3xl">Your pitch</label>
             <textarea
               id="pitch"
               value={pitch}
               onChange={(e) => setPitch(e.target.value)}
-              rows={7}
+              rows={5}
               disabled={busy}
               placeholder="What are you building, for whom, and how will it make money?"
               className={`${field} font-body leading-relaxed`}
@@ -148,21 +148,21 @@ export default function Pitch() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm text-muted">No idea handy? Try one.</span>
+            <span className="text-sm text-muted">Or try</span>
             {EXAMPLES.map((ex) => (
               <button
                 key={ex.label}
                 type="button"
                 aria-label={`Example: ${ex.label}`}
                 onClick={() => setPitch(ex.pitch)}
-                className="rounded-full border-[3px] border-line bg-panel-hi px-3 py-1 text-sm font-bold transition-transform hover:-translate-y-0.5 hover:rotate-[-1.5deg] hover:bg-vc active:translate-y-0 hover:text-fill-ink"
+                className="rounded border-[3px] border-line bg-panel-hi px-2.5 py-1 text-sm font-bold transition-transform hover:-translate-y-0.5 hover:rotate-[-1.5deg] hover:bg-vc active:translate-y-0 hover:text-fill-ink"
               >
                 {ex.label}
               </button>
             ))}
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-3">
             <label className="block text-sm">
               <span className="mb-1 block font-semibold text-muted">Target user (optional)</span>
               <input className={field} maxLength={MAX_META_CHARS} value={targetUser} onChange={(e) => setTargetUser(e.target.value)} />
@@ -227,14 +227,14 @@ export default function Pitch() {
             onPointerLeave={() => setArmed(false)}
             onFocus={() => setArmed(true)}
             onBlur={() => setArmed(false)}
-            className="slab group relative w-full overflow-hidden bg-accent px-6 py-4 text-xl text-on-accent"
+            className={`slab group relative w-full overflow-hidden bg-accent px-6 py-3.5 text-xl text-on-accent ${valid && !calm ? 'armed-pop' : ''}`}
           >
             <span
               aria-hidden="true"
               className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/4 -skew-x-12 bg-white/35 transition-transform duration-700 ease-out group-hover:translate-x-[550%] group-disabled:hidden"
             />
             <span className="relative flex items-center justify-center gap-3">
-              {busy && <Bell ringing={!calm} className="size-6" />}
+              {(busy || valid) && <Bell ringing={busy && !calm} className="size-6 transition-transform group-hover:rotate-12" />}
               <span className={`transition-[letter-spacing] duration-300 ${busy ? '' : 'group-hover:tracking-[0.06em]'}`}>{label}</span>
             </span>
           </button>
@@ -248,7 +248,7 @@ export default function Pitch() {
             </div>
           )}
 
-          <p className="text-sm text-muted">
+          <p className="text-xs leading-relaxed text-muted">
             Do not paste confidential or proprietary information. Debates are reachable by anyone with the link.
             The critique is AI brainstorming, not professional advice.
           </p>

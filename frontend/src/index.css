@@ -7,6 +7,8 @@
  *
  * Colour roles:
  *   canvas / on-canvas   the page, and text written directly on it
+ *   canvas-2             the second ink of the poster's sunburst; on-canvas must read on it too
+ *   punch                the misregistered shadow behind big headline type
  *   panel / ink / muted  surfaces (cards, forms) and the text on them
  *   line / shade         outlines, and the hard offset shadow
  *   accent / on-accent   the primary button
@@ -15,6 +17,8 @@
  */
 @theme {
   --color-canvas: #ffd93d;
+  --color-canvas-2: #ffcd1c;
+  --color-punch: #ff3d6e;
   --color-panel: #ffffff;
   --color-panel-hi: #fff3b0;
   --color-line: #15110d;
@@ -39,6 +43,11 @@
   --color-competitor-ink: #c0123c;
   --color-moderator-ink: #6a2bd0;
 
+  /* Stamp ink: display-size type on a panel, so 3:1 and as bright as that allows. */
+  --color-stamp-go: #008f62;
+  --color-stamp-pivot: #e55300;
+  --color-stamp-no-go: #e01142;
+
   --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
   --font-body: "IBM Plex Serif", Georgia, serif;
   --font-ui: "Archivo", system-ui, sans-serif;
@@ -46,6 +55,8 @@
 
 [data-theme="nightcard"] {
   --color-canvas: #120d2b;
+  --color-canvas-2: #1a1340;
+  --color-punch: #ff4d6d;
   --color-panel: #1d1740;
   --color-panel-hi: #2b2363;
   --color-line: #7b6cf0;
@@ -69,10 +80,16 @@
   --color-cto-ink: #7fb2ff;
   --color-competitor-ink: #ff7088;
   --color-moderator-ink: #c99bff;
+
+  --color-stamp-go: #2ef2b0;
+  --color-stamp-pivot: #ffc53d;
+  --color-stamp-no-go: #ff7088;
 }
 
 [data-theme="courtside"] {
   --color-canvas: #2457ff;
+  --color-canvas-2: #1c4cf0;
+  --color-punch: #0a1030;
   --color-panel: #ffffff;
   --color-panel-hi: #e3eaff;
   --color-line: #0a1030;
@@ -100,6 +117,8 @@
 
 [data-theme="bubblegum"] {
   --color-canvas: #ff9ed8;
+  --color-canvas-2: #ff90d2;
+  --color-punch: #7b2cff;
   --color-panel: #ffffff;
   --color-panel-hi: #ffe3f3;
   --color-line: #2a0a24;
@@ -128,14 +147,29 @@
 [data-theme="nightcard"] { color-scheme: dark; }
 
 @layer base {
-  html { color-scheme: light; background: var(--color-canvas); }
+  html { color-scheme: light; background: var(--color-canvas); transition: background-color 0.35s; overflow-x: clip; }
   body {
     margin: 0;
-    background: var(--color-canvas);
     color: var(--color-on-canvas);
     font-family: var(--font-ui);
     -webkit-font-smoothing: antialiased;
-    transition: background-color 0.35s, color 0.35s;
+    overflow-wrap: break-word;
+    transition: color 0.35s;
+  }
+  /* The poster's sunburst. It turns slowly on its own layer, so it costs one composited transform. */
+  body::before {
+    content: "";
+    position: fixed;
+    left: 50%;
+    top: 34%;
+    z-index: -1;
+    width: 240vmax;
+    height: 240vmax;
+    margin: -120vmax 0 0 -120vmax;
+    pointer-events: none;
+    background: repeating-conic-gradient(var(--color-canvas-2) 0 7.5deg, transparent 0 15deg);
+    animation: rays-turn 240s linear infinite;
+    will-change: transform;
   }
   :focus-visible {
     outline: 3px solid var(--color-on-canvas);
@@ -162,7 +196,7 @@
   background: var(--color-panel);
   color: var(--color-ink);
   border: 3px solid var(--color-line);
-  border-radius: 10px;
+  border-radius: 4px;
   box-shadow: 5px 5px 0 var(--color-shade);
 }
 
@@ -173,14 +207,23 @@
   font-stretch: 62%;
   text-transform: uppercase;
   letter-spacing: 0.005em;
+  word-spacing: 0.14em;
   line-height: 0.9;
+}
+
+/** Headline ink printed slightly off register, the way cheap poster runs come out. */
+.misprint { text-shadow: 0.04em 0.04em 0 var(--color-punch); }
+
+/** The referee's shirt. */
+.ref-stripes {
+  background: repeating-linear-gradient(90deg, var(--agent) 0 16px, var(--color-fill-ink) 16px 32px);
 }
 
 /** A button that presses into its own shadow. */
 .slab {
   position: relative;
   border: 3px solid var(--color-line);
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: 4px 4px 0 var(--color-shade);
   transition: transform 0.12s, box-shadow 0.12s, background-color 0.2s;
   cursor: pointer;
@@ -188,15 +231,31 @@
 }
 .slab:hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 6px 6px 0 var(--color-shade); }
 .slab:active:not(:disabled) { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--color-shade); }
-.slab:disabled { cursor: not-allowed; opacity: 0.45; }
-.slab[aria-busy="true"]:disabled { cursor: progress; opacity: 1; }
+.slab:disabled {
+  cursor: not-allowed;
+  background: var(--color-panel-hi);
+  color: var(--color-muted);
+  border-style: dashed;
+  border-color: var(--color-muted);
+  box-shadow: none;
+}
+.slab[aria-busy="true"]:disabled {
+  cursor: progress;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-style: solid;
+  border-color: var(--color-line);
+}
+/* The moment the pitch is long enough, the button wakes up once. */
+@keyframes armed-pop { 0% { transform: scale(1); } 40% { transform: scale(1.035) rotate(-0.5deg); } 100% { transform: scale(1); } }
+.armed-pop { animation: armed-pop 0.4s cubic-bezier(.2,1.7,.4,1); }
 
 .field {
   width: 100%;
   background: var(--color-panel);
   color: var(--color-ink);
   border: 3px solid var(--color-line);
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 0.55rem 0.75rem;
   transition: box-shadow 0.15s, transform 0.15s;
 }
@@ -204,6 +263,15 @@
 .field:focus { outline: none; box-shadow: 4px 4px 0 var(--agent-ink, var(--color-shade)); transform: translate(-2px, -2px); }
 
 /* ---- Motion that CSS does best ---- */
+
+@keyframes rays-turn { to { transform: rotate(360deg); } }
+
+/* Fighters shifting their weight while the room is set up. */
+@keyframes warmup { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-3px) rotate(3deg); } }
+.warmup { display: block; animation: warmup 1.3s ease-in-out infinite; }
+[data-agent="customer"] .warmup { animation-delay: -0.3s; }
+[data-agent="cto"] .warmup { animation-delay: -0.6s; }
+[data-agent="competitor"] .warmup { animation-delay: -0.9s; }
 
 /* The speaking equaliser: four bars of the speaker's colour. */
 @keyframes eq { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
@@ -214,7 +282,7 @@
 .eq > i:nth-child(4) { animation-delay: -0.15s; animation-duration: 0.8s; }
 
 /* A ring that expands off the active fighter. */
-@keyframes pulse-ring { from { transform: scale(1); opacity: 0.55; } to { transform: scale(1.14); opacity: 0; } }
+@keyframes pulse-ring { from { transform: scale(1); opacity: 0.55; } to { transform: scale(1.05); opacity: 0; } }
 .pulse-ring { animation: pulse-ring 1.4s ease-out infinite; }
 
 /* The bell: a quick decaying swing from its pivot. */
@@ -235,6 +303,28 @@
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
 .sweep { animation: sweep 1.6s ease-in-out infinite; }
 
+/* The rubber stamp: flat ink with a double border. Specks of the paper show through it. */
+.stamp {
+  position: relative;
+  display: inline-block;
+  padding: 0.04em 0.22em 0;
+  border: 0.075em solid currentColor;
+  border-radius: 0.06em;
+  outline: 0.018em solid currentColor;
+  outline-offset: -0.13em;
+}
+.stamp::after {
+  content: "";
+  position: absolute;
+  inset: -0.1em;
+  pointer-events: none;
+  background: var(--color-panel);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.42' numOctaves='3' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -11 4.0'/%3E%3C/filter%3E%3Crect width='320' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+  mask-size: 320px 180px;
+}
+/* Where the stamp will land, before it does. */
+.stamp-mark { border: 4px dashed var(--color-muted); border-radius: 6px; opacity: 0.55; }
+
 /* Streaming cursor. */
 @keyframes blink { 50% { opacity: 0; } }
 .caret {
@@ -244,9 +334,9 @@
 
 /* Reduced motion: nothing loops or travels. State changes (colour, opacity) stay. */
 @media (prefers-reduced-motion: reduce) {
-  .eq > i, .pulse-ring, .bell-ring, .tick-pop, .sweep, .caret,
+  body::before, .warmup, .eq > i, .pulse-ring, .bell-ring, .tick-pop, .sweep, .caret, .armed-pop,
   [data-pressure] .beat { animation: none !important; }
   .eq > i { transform: scaleY(0.7); }
-  .slab, .field, body { transition: none; }
+  .slab, .field, html, body { transition: none; }
   .slab:hover:not(:disabled), .slab:active:not(:disabled) { transform: none; }
 }
