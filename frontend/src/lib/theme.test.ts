@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import indexHtml from '../../index.html?raw'
 import { DEFAULT_THEME, THEMES, THEME_KEY, applyTheme, getStoredTheme, initTheme, isThemeId, setTheme } from './theme'
 
 describe('theme storage', () => {
@@ -96,5 +97,16 @@ describe.each(THEMES.map((t) => t.id))('theme %s', (id) => {
       const d = Math.hypot(...a.map((x, k) => x - b[k]))
       expect(d, `${AGENTS[i]} vs ${AGENTS[j]}`).toBeGreaterThan(90)
     }
+  })
+})
+
+// index.html applies the stored theme before the app loads, so it keeps its own copy of the ids.
+describe('the pre-paint theme script', () => {
+  it('index.html applies exactly the themes this module knows, before first paint', () => {
+    const html = indexHtml
+    const list = html.match(/\[((?:\s*'[a-z]+',?)+)\s*\]\.indexOf\(t\)/)
+    expect(list, 'the inline theme script in index.html').not.toBeNull()
+    const ids = [...list![1].matchAll(/'([a-z]+)'/g)].map((m) => m[1])
+    expect(ids).toEqual(THEMES.map((t) => t.id))
   })
 })
