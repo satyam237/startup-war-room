@@ -55,7 +55,8 @@ class Rig:
         self.gw = gw or FakeGateway(default_script)
         self.log = EventLog()
         self.store = InMemoryStore()
-        self.settings = get_settings().model_copy(update=settings)
+        # No reserve unless a test asks: most tests here pin the behaviour at a single cap.
+        self.settings = get_settings().model_copy(update={"JUDGE_TOKEN_RESERVE": 0, **settings})
         kwargs = {"clock": clock} if clock else {}
         self.deps = Deps(gw=self.gw, log=self.log, settings=self.settings, store=self.store, **kwargs)
         self.graph = build_graph(self.deps, InMemorySaver())
@@ -449,6 +450,126 @@ async def test_cap_just_above_the_last_turn_still_gets_the_judge():
     await rig.run()
     assert rig.named("verdict")[0]["fallback"] is False
     assert rig.named("done") == [{"status": "complete"}]
+
+
+async def test_turns_stop_at_the_cap_minus_the_judge_reserve():
+    # persona + vc + customer + its repeat check + cto = 5 calls = 10000 tokens: the turn budget.
+    rig = Rig(
+        FakeGateway(default_script, usage_per_call=(1000, 1000, 0.0)),
+        MAX_TOKENS_PER_DEBATE=30000, JUDGE_TOKEN_RESERVE=20000,
+    )
+    await rig.run()
+    assert len(rig.named("turn_end")) == 3
+    assert len(rig.calls(is_verdict)) == 1  # the reserve paid for a real judge call
+    assert rig.named("verdict")[0]["fallback"] is False
+    assert rig.named("done") == [{"status": "budget_exceeded"}]
+
+
+async def test_no_turn_retry_inside_the_judge_reserve():
+    def vc_turn(call):
+        return is_critic(call) and "You are the VC" in call["user"]
+
+    class BilledFailure(FakeGateway):
+        def _gate(self, call):
+            self.calls.append(call)
+            if vc_turn(call):
+                exc = LLMError("failed after billing")
+                exc.usage = Usage(model="fake", tokens_in=10000, tokens_out=0, cost_usd=0.0, latency_ms=0)
+                raise exc
+
+    gw = BilledFailure(default_script, usage_per_call=(0, 0, 0.0))
+    rig = Rig(gw, MAX_TOKENS_PER_DEBATE=30000, JUDGE_TOKEN_RESERVE=20000)
+    await rig.run()
+    assert len(rig.calls(vc_turn)) == 1
+    assert rig.named("turn_end") == []
+
+
+async def test_no_repeat_check_or_regeneration_inside_the_judge_reserve():
+    rig = Rig(
+        FakeGateway(default_script, usage_per_call=(1000, 1000, 0.0)),
+        MAX_TOKENS_PER_DEBATE=26000, JUDGE_TOKEN_RESERVE=20000,
+    )
+    await rig.run()  # persona + vc + customer = 6000, the turn budget, so no repeat check runs
+    assert rig.calls(lambda c: c["schema"] is _RepeatVerdict) == []
+
+
+async def test_no_checkpoint_retry_inside_the_judge_reserve():
+    class BilledCheckpoint(FakeGateway):
+        attempts = 0
+
+        async def structured(self, tier, system, user, schema, app_fields=None):
+            if schema is Checkpoint:
+                self.attempts += 1
+                exc = LLMError("failed after billing")
+                exc.usage = Usage(model="fake", tokens_in=5000, tokens_out=0, cost_usd=0.0, latency_ms=0)
+                raise exc
+            return await super().structured(tier, system, user, schema, app_fields)
+
+    gw = BilledCheckpoint(default_script, usage_per_call=(0, 0, 0.0))
+    rig = Rig(gw, MAX_TOKENS_PER_DEBATE=25000, JUDGE_TOKEN_RESERVE=20000)
+    await rig.run()
+    assert gw.attempts == 1
+    assert rig.named("verdict")[0]["fallback"] is False
+
+
+async def test_judge_ladder_runs_all_rungs_inside_the_reserve():
+    def script(call):
+        if is_verdict(call):
+            return good_verdict().model_copy(update={"risks": []})  # fails check_consistency
+        return default_script(call)
+
+    # 22 calls before the verdict = 44000 tokens: exactly the turn budget, and past the old cap.
+    rig = Rig(
+        FakeGateway(script, usage_per_call=(1000, 1000, 0.0)),
+        MAX_TOKENS_PER_DEBATE=104000, JUDGE_TOKEN_RESERVE=60000,
+    )
+    await rig.run()
+    assert [c["tier"] for c in rig.calls(is_verdict)] == ["judge", "judge", "escalation"]
+
+
+async def test_ladder_stops_at_the_full_cap_not_the_turn_budget():
+    def script(call):
+        if is_verdict(call):
+            return good_verdict().model_copy(update={"risks": []})
+        return default_script(call)
+
+    # Turn budget 44000; each judge call adds 2000, so the second one reaches the full cap.
+    rig = Rig(
+        FakeGateway(script, usage_per_call=(1000, 1000, 0.0)),
+        MAX_TOKENS_PER_DEBATE=48000, JUDGE_TOKEN_RESERVE=4000,
+    )
+    await rig.run()
+    assert len(rig.calls(is_verdict)) == 2
+    assert rig.named("verdict")[0]["fallback"] is True
+    assert rig.named("done") == [{"status": "budget_exceeded"}]
+
+
+async def test_no_llm_call_starts_at_the_full_cap_even_with_a_reserve():
+    rig = Rig(MAX_TOKENS_PER_DEBATE=100, JUDGE_TOKEN_RESERVE=50)
+    state = initial_state("d1", PITCH, META, rig.settings)
+    state["budget"]["tokens_used"] = 100  # intake spent it all
+    await rig.graph.ainvoke(state, rig.config)
+    assert rig.gw.calls == []
+    assert rig.named("verdict")[0]["fallback"] is True
+    assert rig.named("done") == [{"status": "budget_exceeded"}]
+
+
+async def test_truncated_judge_is_not_a_budget_stop_below_the_cap():
+    class TruncatedJudge(FakeGateway):
+        async def structured(self, tier, system, user, schema, app_fields=None):
+            if schema is Verdict:
+                self.calls.append({"schema": schema, "tier": tier, "system": system, "user": user})
+                exc = LLMError("structured output truncated (finish_reason=length)")
+                exc.usage = Usage(model="fake", tokens_in=0, tokens_out=16000, cost_usd=0.0, latency_ms=0)
+                raise exc
+            return await super().structured(tier, system, user, schema, app_fields)
+
+    gw = TruncatedJudge(default_script, usage_per_call=(1000, 1000, 0.0))
+    rig = Rig(gw, MAX_TOKENS_PER_DEBATE=120000, JUDGE_TOKEN_RESERVE=60000)
+    await rig.run()
+    assert len(rig.calls(is_verdict)) == 3
+    assert rig.named("verdict")[0]["fallback"] is True
+    assert rig.named("done") != [{"status": "budget_exceeded"}]
 
 
 async def test_lowered_turn_cap_jumps_to_verdict():

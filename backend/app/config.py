@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
@@ -26,7 +26,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./warroom.db"
     FRONTEND_ORIGIN: str = "http://localhost:5173"
     MAX_TURNS: int = 14
-    MAX_TOKENS_PER_DEBATE: int = 40000
+    MAX_TOKENS_PER_DEBATE: int = 120000
+    # Turns and checkpoints stop this far below the cap, so the judge ladder can always run.
+    # Must follow MAX_TOKENS_PER_DEBATE: its validator reads that field.
+    JUDGE_TOKEN_RESERVE: int = Field(default=60000, validate_default=True)
     RATE_LIMIT_PER_HOUR: int = 5
     INTAKE_RATE_LIMIT_PER_HOUR: int = 20
     FEEDBACK_RATE_LIMIT_PER_HOUR: int = 20
@@ -35,6 +38,14 @@ class Settings(BaseSettings):
     REBUTTAL_TIMEOUT_S: float = 45
     DEBATE_TIMEOUT_S: int = 240
     MAX_CONCURRENT_DEBATES: int = 10
+
+    @field_validator("JUDGE_TOKEN_RESERVE")
+    @classmethod
+    def _reserve_leaves_turn_budget(cls, v: int, info: ValidationInfo) -> int:
+        cap = info.data.get("MAX_TOKENS_PER_DEBATE")
+        if cap is not None and v >= cap:
+            raise ValueError(f"JUDGE_TOKEN_RESERVE ({v}) must be below MAX_TOKENS_PER_DEBATE ({cap})")
+        return v
 
     @field_validator("DATABASE_URL")
     @classmethod

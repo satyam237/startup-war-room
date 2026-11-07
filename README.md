@@ -61,7 +61,8 @@ cd frontend && npx vitest run && npm run build
 | `FRONTEND_ORIGIN` | `http://localhost:5173` | The one allowed CORS origin |
 | `TRUSTED_PROXY_HOPS` | `0` | Proxies whose `X-Forwarded-For` entry is trusted for rate limiting. Set `1` on Heroku |
 | `MAX_TURNS` | `14` | Turn cap |
-| `MAX_TOKENS_PER_DEBATE` | `40000` | Token budget per debate |
+| `MAX_TOKENS_PER_DEBATE` | `120000` | Hard token cap per debate. No LLM call starts once it is reached |
+| `JUDGE_TOKEN_RESERVE` | `60000` | Turns and checkpoints stop this far below the cap, leaving the rest for the verdict ladder. Must be below the cap, or the app refuses to start |
 | `RATE_LIMIT_PER_HOUR` | `5` | Debates per client per hour |
 | `INTAKE_RATE_LIMIT_PER_HOUR` | `20` | Intake checks per client per hour |
 | `REBUTTAL_TIMEOUT_S` | `45` | Wait for a founder rebuttal |

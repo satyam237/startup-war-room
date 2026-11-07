@@ -433,14 +433,14 @@ async def test_refused_pitch_422(client):
 
 
 async def test_intake_tokens_count_against_the_debate(client, monkeypatch):
-    configure(monkeypatch, REBUTTAL_TIMEOUT_S=0.01, MAX_TOKENS_PER_DEBATE=100)
+    configure(monkeypatch, REBUTTAL_TIMEOUT_S=0.01, MAX_TOKENS_PER_DEBATE=100, JUDGE_TOKEN_RESERVE=0)
     install(FakeGateway(usage_per_call=(60, 40, 0.25)))
     debate_id = await create(client)
     await wait_finished(debate_id)
     stored = await db.get_debate(debate_id)
-    # Intake spends the whole budget, so only the persona call runs before the fallback.
+    # Intake spends the whole budget, so no further call starts, not even the persona.
     assert stored["status"] == "budget_exceeded"
-    assert stored["total_tokens"] == 200 and stored["est_cost"] == 0.5
+    assert stored["total_tokens"] == 100 and stored["est_cost"] == 0.25
 
 
 async def test_concurrency_cap_503(client, monkeypatch):
@@ -574,7 +574,7 @@ async def test_intake_has_a_wall_clock_limit_and_fails_open(client, monkeypatch)
 
 
 async def test_intake_timeout_keeps_usage_so_far(client, monkeypatch):
-    configure(monkeypatch, REBUTTAL_TIMEOUT_S=0.01, MAX_TOKENS_PER_DEBATE=100)
+    configure(monkeypatch, REBUTTAL_TIMEOUT_S=0.01, MAX_TOKENS_PER_DEBATE=100, JUDGE_TOKEN_RESERVE=0)
     monkeypatch.setattr(routes, "INTAKE_TIMEOUT_S", 0.02)
 
     async def slow_intake(_gw, _pitch, _meta, on_usage):
@@ -587,7 +587,7 @@ async def test_intake_timeout_keeps_usage_so_far(client, monkeypatch):
     await wait_finished(debate_id)
     stored = await db.get_debate(debate_id)
     assert stored["status"] == "budget_exceeded"  # the budget was spent before the persona ran
-    assert stored["total_tokens"] == 102 and stored["est_cost"] == 0.25
+    assert stored["total_tokens"] == 100 and stored["est_cost"] == 0.25
 
 
 async def post_then_vanish(body: dict[str, Any]) -> list[dict[str, Any]]:

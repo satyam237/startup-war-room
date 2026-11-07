@@ -3,11 +3,13 @@
 setup -> round_1 -> moderator_1 -> rebuttal -> round_2 -> moderator_2 -> round_3 -> verdict -> report
 
 Any step before round_3 that exhausts the token, turn, or time budget jumps to `verdict`
-with status `budget_exceeded`. The token cap is a hard stop: once reached, no further LLM
-call starts, so a debate at the cap ends on `fallback_verdict`. Time works in two stages:
-turns stop when only JUDGE_RESERVE_S is left, and the deadline itself cuts off whatever is
-still running. Everything the client sees goes through `Deps.log`, using the SSE
-contract's event names and payloads.
+with status `budget_exceeded`. Tokens work in two stages: turns, checkpoints and their
+retries stop at the cap minus JUDGE_TOKEN_RESERVE, and the judge ladder may run on up to
+the cap itself. The cap is a hard stop: once reached, no further LLM call starts, so a
+debate at the cap ends on `fallback_verdict`. Time works in two stages too: turns stop when
+only JUDGE_RESERVE_S is left, and the deadline itself cuts off whatever is still running.
+Everything the client sees goes through `Deps.log`, using the SSE contract's event names
+and payloads.
 
 Two LangGraph behaviours shape the rebuttal step (langgraph 1.2.20, checked by running it):
 - A node re-executes from its first line on resume, so `rebuttal` publishes nothing before
@@ -54,6 +56,7 @@ REGENERATE_NOTE = "\n\nYour draft repeated a point already made in the debate. M
 class Budget(TypedDict):
     tokens_used: int
     max_tokens: int
+    judge_reserve: int
     turns_used: int
     max_turns: int
     cost_usd: float
@@ -163,6 +166,7 @@ def initial_state(
         budget=Budget(
             tokens_used=0,
             max_tokens=settings.MAX_TOKENS_PER_DEBATE,
+            judge_reserve=settings.JUDGE_TOKEN_RESERVE,
             turns_used=0,
             max_turns=settings.MAX_TURNS,
             cost_usd=0.0,
@@ -238,11 +242,16 @@ class _Meter:
         return self._deadline - self._clock()
 
     def tokens_spent(self) -> bool:
+        """The full cap: no LLM call of any kind starts past this."""
         return self.budget["tokens_used"] >= self.budget["max_tokens"]
+
+    def turn_tokens_spent(self) -> bool:
+        """The cap minus the judge's reserve: no turn, checkpoint or retry starts past this."""
+        return self.budget["tokens_used"] >= self.budget["max_tokens"] - self.budget["judge_reserve"]
 
     def exhausted(self) -> bool:
         return (
-            self.tokens_spent()
+            self.turn_tokens_spent()
             or self.budget["turns_used"] >= self.budget["max_turns"]
             or self.remaining_s() <= JUDGE_RESERVE_S
         )
@@ -266,6 +275,8 @@ class _Debate:
         meter = self._meter(state)
         self.log.publish("setup", {"step": "persona", "message": "Building the customer persona."})
         try:
+            if meter.tokens_spent():
+                raise LLMError("the token cap was reached before the persona")
             async with asyncio.timeout(meter.remaining_s()):
                 built = await run_persona(self.deps.gw, state["pitch"], state["pitch_meta"], on_usage=meter.add)
             persona, competitors = built.persona, built.competitors
@@ -298,7 +309,7 @@ class _Debate:
     ) -> Any | None:
         """Announce and run `call`, retrying once on LLMError. None means no try succeeded."""
         for _ in range(2):
-            if meter.tokens_spent():
+            if meter.turn_tokens_spent():
                 return None
             attempt = next(attempts)
             self.log.publish("turn_start", {"turn_id": turn_id, "agent": agent, "round": round, "attempt": attempt})
@@ -357,7 +368,7 @@ class _Debate:
                     meter, turn_id, agent, round, attempts, lambda: self._stream(meter, turn_id, system, user)
                 )
                 earlier = [t["text"] for t in view["transcript"]]
-                check = text is not None and not meter.tokens_spent()
+                check = text is not None and not meter.turn_tokens_spent()
                 if check and await is_repeat(self.deps.gw, text, earlier, on_usage=meter.add):
                     self.log.publish("turn_reset", {"turn_id": turn_id, "reason": "repetition"})
                     regenerated = await self._with_retry(
@@ -445,7 +456,7 @@ class _Debate:
         try:
             async with asyncio.timeout(meter.remaining_s()):
                 for _ in range(2):
-                    if meter.tokens_spent():
+                    if meter.turn_tokens_spent():
                         break
                     try:
                         checkpoint = await run_checkpoint(self.deps.gw, state, round, on_usage=meter.add)

@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from app import config
 from app.config import ENV_FILES, Settings
 
@@ -51,3 +54,25 @@ def test_sslmode_query_is_dropped_and_other_urls_untouched():
 
 def test_tests_run_on_the_fake_provider():
     assert Settings().LLM_PROVIDER == "fake"
+
+
+def test_token_cap_leaves_the_judge_its_reserve_by_default(monkeypatch):
+    monkeypatch.delenv("MAX_TOKENS_PER_DEBATE", raising=False)
+    monkeypatch.delenv("JUDGE_TOKEN_RESERVE", raising=False)
+    settings = Settings()
+    assert settings.MAX_TOKENS_PER_DEBATE == 120000
+    assert settings.JUDGE_TOKEN_RESERVE == 60000
+
+
+def test_a_reserve_that_leaves_no_turn_budget_is_refused(monkeypatch):
+    """A stale MAX_TOKENS_PER_DEBATE=40000 would otherwise end every debate before its first turn."""
+    monkeypatch.delenv("JUDGE_TOKEN_RESERVE", raising=False)
+    with pytest.raises(ValidationError, match="JUDGE_TOKEN_RESERVE"):
+        Settings(MAX_TOKENS_PER_DEBATE=40000)
+
+
+def test_env_example_and_readme_state_the_token_budget():
+    example = (BACKEND_DIR.parent / ".env.example").read_text()
+    assert "MAX_TOKENS_PER_DEBATE=120000" in example and "JUDGE_TOKEN_RESERVE=60000" in example
+    readme = (BACKEND_DIR.parent / "README.md").read_text()
+    assert "| `MAX_TOKENS_PER_DEBATE` | `120000` |" in readme and "| `JUDGE_TOKEN_RESERVE` | `60000` |" in readme

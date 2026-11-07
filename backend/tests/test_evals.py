@@ -206,6 +206,7 @@ async def test_recorder_forgets_errors_that_a_later_call_recovered():
 
 def test_three_identical_budget_exceeded_debates_do_not_stop(tmp_path, monkeypatch):
     monkeypatch.setenv("MAX_TOKENS_PER_DEBATE", "500")
+    monkeypatch.setenv("JUDGE_TOKEN_RESERVE", "0")
     get_settings.cache_clear()
     out = tmp_path / "r.json"
     assert run_evals.main(["--limit", "5", "--concurrency", "1", "--out", str(out)]) == 0
