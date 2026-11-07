@@ -1,5 +1,6 @@
 import pytest
 
+from app.agents import load_prompt
 from app.agents.moderator import Checkpoint, run_checkpoint, verdict_prompt
 from app.agents.persona import PersonaResult, run_persona
 from app.agents.roster import CRITIC_ORDER, critic_prompt
@@ -187,3 +188,17 @@ def test_verdict_prompt_includes_inputs():
     assert "recommendation" in system.lower() and "scorecard" in system.lower()
     for needle in ("Final take.", "We have traction.", "top_risk"):
         assert needle in user
+
+
+def test_round_2_opens_on_an_objection_not_agreement():
+    system, _ = critic_prompt("cto", make_state(round=2), 2)
+    assert "Open with your strongest objection" in system
+    assert 'never with agreement such as "I agree"' in system
+
+
+def test_persona_figures_are_labelled_as_assumptions():
+    assert "label it as an assumption" in load_prompt("persona")
+
+
+def test_competitor_may_not_assert_a_named_company_s_internals():
+    assert "Never assert the internals of a named real company" in load_prompt("competitor")

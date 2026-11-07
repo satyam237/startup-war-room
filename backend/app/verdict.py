@@ -12,7 +12,7 @@ from typing import Any
 from app.agents import field
 from app.agents.moderator import verdict_prompt
 from app.agents.roster import CRITIC_ORDER, LABELS
-from app.guards import UsageSink
+from app.guards import UsageSink, wrap_untrusted
 from app.llm import LLMError, LLMGateway, LLMUnavailable
 from app.models import Experiment, Risk, Scorecard, ScoreItem, Verdict
 
@@ -87,9 +87,12 @@ async def _attempt(
 
 
 def _with_errors(user: str, errors: list[str], previous: Verdict | None, heading: str) -> str:
-    out = user + f"\n\n{heading}\n" + "\n".join(f"- {e}" for e in errors)
+    """The errors quote model text and the verdict is model text, so both go back in as data."""
+    bullets = "\n".join(f"- {e}" for e in errors)
+    out = user + f"\n\n{heading}\n" + wrap_untrusted("validation_errors", bullets)
     if previous is not None:
-        out += "\n\nThe rejected verdict was:\n" + previous.model_dump_json(exclude={"fallback"})
+        rejected = previous.model_dump_json(exclude={"fallback"})
+        out += "\n\nThe rejected verdict was:\n" + wrap_untrusted("rejected_verdict", rejected)
     return out + "\n\nReturn a corrected verdict."
 
 
@@ -181,27 +184,36 @@ def _fallback_risks(state: dict[str, Any]) -> list[Risk]:
     ]
 
 
+FIRST_CHECK_DAYS = 7
+
+
 def _fallback_experiments(state: dict[str, Any]) -> list[Experiment]:
-    conditions = [
-        str(field(p, "change_mind_if"))
+    """A panelist's condition may take far longer than the timebox, so each is worded as a
+    first check on it, never as the condition met in a week."""
+    first_checks = [
+        Experiment(
+            test=f"First check, not the full test, for this condition: {field(p, 'change_mind_if')}",
+            timebox_days=FIRST_CHECK_DAYS,
+            success_criteria="At least 5 of 10 prospects show early signs of it",
+            kill_criteria=f"Fewer than 2 of 10 prospects show early signs of it in this {FIRST_CHECK_DAYS}-day first check",
+        )
         for p in _positions(state).values()
         if field(p, "change_mind_if")
     ]
     defaults = [
-        "Interview 10 target customers about their current workaround",
-        "Run a landing page with a price and measure signups",
-        "Get 3 prospects to sign a letter of intent",
-    ]
-    tests = (conditions + defaults)[:3]
-    return [
         Experiment(
-            test=t,
-            timebox_days=7,
+            test=test,
+            timebox_days=FIRST_CHECK_DAYS,
             success_criteria="At least 5 of 10 prospects show clear demand",
-            kill_criteria="Fewer than 2 of 10 prospects show demand after 7 days",
+            kill_criteria=f"Fewer than 2 of 10 prospects show demand after {FIRST_CHECK_DAYS} days",
         )
-        for t in tests
+        for test in (
+            "Interview 10 target customers about their current workaround",
+            "Run a landing page with a price and measure signups",
+            "Get 3 prospects to sign a letter of intent",
+        )
     ]
+    return (first_checks + defaults)[:3]
 
 
 def fallback_verdict(state: dict[str, Any]) -> Verdict:
