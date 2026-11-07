@@ -37,6 +37,7 @@ REASONING_EFFORT: dict[str, str] = {
 # count against the limit.
 MAX_TOKENS: dict[str, int] = {"fast": 1000, "agent": 1500, "judge": 16000, "escalation": 16000}
 REFUSED_STATUSES = (401, 402, 403)
+MODEL_LIST_TIMEOUT_S = 5
 
 
 class Usage(BaseModel):
@@ -196,6 +197,15 @@ class OpenRouterGateway:
             "timeout": TIMEOUTS_S[tier],
             "extra_body": {"reasoning": {"effort": REASONING_EFFORT[tier]}},
         }
+
+    async def supported_parameters(self) -> dict[str, set[str]]:
+        """Each model OpenRouter lists, with the request parameters it accepts."""
+        client = self._client.with_options(max_retries=0, timeout=MODEL_LIST_TIMEOUT_S)
+        page = await client.models.list()
+        listed = {m.id: set(_extra(m, "supported_parameters") or ()) for m in page.data if m.id}
+        if not listed:  # an unusable reply says nothing about the models
+            raise LLMError("the model list was empty or malformed")
+        return listed
 
     async def stream_text(
         self, tier: Tier, system: str, user: str, on_usage: Callable[[Usage], None]

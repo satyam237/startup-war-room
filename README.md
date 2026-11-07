@@ -34,7 +34,7 @@ cd frontend && npm ci && npm run dev    # http://localhost:5173, proxies /debate
 ```bash
 cd backend
 LLM_PROVIDER=fake uv run uvicorn app.main:app --port 8000
-curl localhost:8000/health      # {"status":"ok"}
+curl localhost:8000/health      # {"status":"ok","models_ok":true,"key_ok":true}
 cd ../frontend && npm ci && npm run dev
 ```
 
@@ -52,8 +52,8 @@ cd frontend && npx vitest run && npm run build
 | `LLM_PROVIDER` | `openrouter` | `openrouter` or `fake` |
 | `OPENROUTER_API_KEY` | empty | Required when the provider is `openrouter`. Environment only |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | API base |
-| `FAST_MODEL` | `openai/gpt-6.1-terra` | Guards, persona, critics, checkpoints |
-| `AGENT_MODEL` | `openai/gpt-6.1-terra` | Critic turns |
+| `FAST_MODEL` | `openai/gpt-6.1-terra` | Intake and repeat guards, persona |
+| `AGENT_MODEL` | `openai/gpt-6.1-terra` | Critic turns, final positions, checkpoints |
 | `JUDGE_MODEL` | `openai/gpt-6.1-sol` | Verdict |
 | `ESCALATION_MODEL` | `anthropic/claude-opus-5.5` | Verdict retry after two failed validations |
 | `FAKE_DELAY_S` | `0` | Per-token delay for the fake provider |
@@ -80,15 +80,27 @@ heroku config:set JUDGE_MODEL=<openrouter-model-id> --app <app>
 
 Cost is read from OpenRouter's usage accounting, so a new model needs no price table.
 
+A swapped-in model must accept this app's requests. On OpenRouter's `/models` list, its `supported_parameters` must include `reasoning` and either `structured_outputs` or `response_format`, because every model here is sent both. The check runs at startup on the `openrouter` provider: an unsupported or unlisted model logs an ERROR and makes `/health` return `models_ok: false`. If the list cannot be fetched, the app logs a warning and starts anyway. After a swap, restart and read `/health`.
+
 ## Health check
 
-`GET /health` returns `{"status":"ok"}`. It checks that the process is up, not the database or the model provider.
+`GET /health` always returns HTTP 200 while the process is up, with `{"status":"ok","models_ok":true,"key_ok":true}`. `models_ok` is `false` when the startup check found an unusable model, and `key_ok` is `false` when the `openrouter` provider has no `OPENROUTER_API_KEY`. It does not check the database, credits, or whether the provider is reachable now.
+
+## Debate status
+
+| Status | Meaning |
+|---|---|
+| `complete` | All rounds ran. A `fallback` verdict can still appear if the judge ladder failed |
+| `budget_exceeded` | A token, turn, or time limit ended the debate early |
+| `partial` | The debate ended short of four final positions, or the provider refused the key or the account (HTTP 401, 402, 403) after at least one critic spoke. The evals do not count it as completed |
+| `failed` | No verdict: the provider refused before any critic spoke, or the process stopped |
 
 ## Deployment
 
 - Backend: Heroku Basic dyno plus Heroku Postgres. Deploy the `backend/` directory with `git subtree push --prefix backend heroku main`, so `backend/Procfile`, `pyproject.toml`, `uv.lock` and `.python-version` sit at the build root, which is what Heroku's Python buildpack uses to detect a uv project. `backend/Dockerfile` runs the same command for any container host.
 - Frontend: Vercel with root directory `frontend`, env `VITE_API_URL` set to the backend URL. `frontend/vercel.json` rewrites all paths to `index.html` for the SPA router.
-- Set `FRONTEND_ORIGIN` on the backend to the Vercel URL (no trailing slash).
+- Set `FRONTEND_ORIGIN` on the backend to the Vercel URL.
+- Set `TRUSTED_PROXY_HOPS=1` on the backend (`heroku config:set TRUSTED_PROXY_HOPS=1 --app <app>`). Heroku's router is the one trusted proxy; left at `0`, every visitor shares one rate-limit bucket.
 
 ## Known limits
 
@@ -97,7 +109,7 @@ Cost is read from OpenRouter's usage accounting, so a new model needs no price t
 - Rate-limit state lives per process and resets when the dyno restarts.
 - No live market data. Critique reasons from the pitch and the model's knowledge, which may be out of date or wrong.
 - Critique is for brainstorming and is not professional advice.
-- No authentication. Debates are public to anyone with the unguessable link; deletion uses a token shown once at creation.
+- No authentication. Debates are public to anyone with the unguessable link; deletion uses a token that the browser that created the debate keeps in `localStorage`, so only that browser can delete it.
 - The Postgres path has not been exercised against a live Postgres in this repository's tests, which run on SQLite.
 
 ## Measured results
