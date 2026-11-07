@@ -4,7 +4,7 @@
 
 Reads the file `run_evals.py` writes, partial or complete. A verdict with `fallback: true`
 is counted on its own and never as a schema-valid success, so an outage or a 402 cannot
-look like a pass.
+look like a pass. Only status `complete` counts as completed, never `partial`.
 """
 
 import json
@@ -54,6 +54,7 @@ def summarize(results: list[dict[str, Any]], provider: str) -> dict[str, Any]:
     n = len(results)
     finished = [r for r in results if r["status"] != "crashed"]
     completed = [r for r in results if r["status"] == "complete"]
+    partial = [r for r in results if r["status"] == "partial"]
     fallbacks = [r for r in results if r["fallback"]]
     valid = [r for r in results if r["schema_valid"] and not r["fallback"]]
     real_verdicts = [r for r in results if r["consistency_errors"] is not None and not r["fallback"]]
@@ -69,6 +70,7 @@ def summarize(results: list[dict[str, Any]], provider: str) -> dict[str, Any]:
         "provider": provider,
         "meaningful": provider != "fake",
         "completion_rate": _rate(len(completed), n),
+        "partial_count": len(partial),
         "fallback_count": len(fallbacks),
         "crashed_count": n - len(finished),
         "schema_valid_rate": _rate(len(valid), n),
@@ -105,11 +107,12 @@ def format_report(s: dict[str, Any]) -> str:
     lines += [
         f"debates:                 {s['debates']}",
         f"completion rate:         {_pct(s['completion_rate'])}",
+        f"partial debates:         {s['partial_count']}  (not counted as completed)",
         f"fallback verdicts:       {s['fallback_count']}  (counted apart, never as valid)",
         f"crashed:                 {s['crashed_count']}",
         f"schema-valid rate:       {_pct(s['schema_valid_rate'])}  (real verdicts only)",
         f"latency p50 / p95:       {_num(s['latency_p50_s'], '.1f')}s / {_num(s['latency_p95_s'], '.1f')}s",
-        "                         (includes fallback and budget_exceeded debates; inflated when concurrency > 1)",
+        "                         (includes fallback, partial and budget_exceeded debates; inflated when concurrency > 1)",
         f"tokens total / mean:     {s['tokens_total']} / {_num(s['tokens_mean'], '.0f')}",
         f"cost total / mean:       ${s['cost_total_usd']:.4f} / ${_num(s['cost_mean_usd'], '.4f')}",
         f"repetition rate:         {_pct(s['repetition_rate'])}  (turns regenerated for repeating a point)",

@@ -279,6 +279,9 @@ async def test_round_3_failure_retries_then_continues():
     assert set(result["final_positions"]) == {"customer", "cto", "competitor"}
     assert rig.named("turn_failed")[0]["agent"] == "vc"
     assert result["budget"]["turns_used"] == 14
+    assert rig.named("verdict")[0]["fallback"] is False  # the judge still ran on three positions
+    assert rig.named("done") == [{"status": "partial"}]
+    assert rig.store.fields["status"] == "partial"
 
 
 async def test_all_critics_refuse_still_ends_with_fallback():
@@ -290,8 +293,98 @@ async def test_all_critics_refuse_still_ends_with_fallback():
     verdict = rig.named("verdict")[0]
     assert verdict["fallback"] is True
     assert Verdict.model_validate(verdict) == rig.store.verdict
-    assert rig.named("done") == [{"status": "complete"}]
+    assert rig.named("done") == [{"status": "partial"}]
     assert result["budget"]["turns_used"] == 14
+
+
+def after_calls(n: int) -> Any:
+    """A predicate that starts refusing from the (n+1)th call."""
+    seen = iter(range(10_000))
+    return lambda _call: next(seen) >= n
+
+
+async def test_refused_provider_before_any_critic_fails_the_debate(caplog):
+    gw = FakeGateway(default_script, unavailable_on=lambda _: True)
+    rig = Rig(gw)
+    with caplog.at_level("ERROR", logger="app.graph"):
+        result = await rig.run()
+    assert len(gw.calls) == 1  # the persona call; nothing was tried after the refusal
+    assert rig.named("await_rebuttal") == []
+    assert rig.named("verdict") == []
+    assert rig.named("error")[0]["recoverable"] is False
+    assert "provider" in rig.named("error")[0]["message"]
+    assert rig.named("done") == [{"status": "failed"}]
+    assert rig.store.fields["status"] == "failed"
+    assert rig.store.verdict is None
+    assert result["status"] == "failed"
+    assert any(r.levelname == "ERROR" and "HTTP 402" in r.getMessage() for r in caplog.records)
+
+
+async def test_refused_provider_when_no_turn_succeeded_fails_the_debate():
+    gw = FakeGateway(default_script, unavailable_on=is_critic)
+    rig = Rig(gw)
+    await rig.run()
+    assert len(gw.calls) == 2  # the persona, then the first critic, which is not retried
+    assert rig.named("turn_failed")[0]["agent"] == "vc"
+    assert rig.named("await_rebuttal") == []
+    assert rig.named("done") == [{"status": "failed"}]
+
+
+async def test_refused_provider_after_a_turn_ends_on_a_partial_fallback():
+    gw = FakeGateway(default_script, unavailable_on=after_calls(2))  # persona, vc, then refused
+    rig = Rig(gw)
+    await rig.run()
+    assert len(gw.calls) == 3
+    assert [t["agent"] for t in rig.named("turn_end")] == ["vc"]
+    assert rig.named("turn_failed")[0]["agent"] == "customer"
+    assert rig.named("await_rebuttal") == []
+    assert rig.named("verdict")[0]["fallback"] is True
+    assert rig.named("done") == [{"status": "partial"}]
+    assert rig.store.verdict.fallback is True
+
+
+async def test_refused_repeat_check_keeps_the_turn_and_stops():
+    # persona, vc, customer, then the repeat check on the customer's turn is refused.
+    gw = FakeGateway(default_script, unavailable_on=after_calls(3))
+    rig = Rig(gw)
+    await rig.run()
+    assert len(gw.calls) == 4
+    assert [t["agent"] for t in rig.named("turn_end")] == ["vc", "customer"]
+    assert rig.named("done") == [{"status": "partial"}]
+
+
+async def test_refused_checkpoint_stops_without_a_rebuttal_window():
+    gw = FakeGateway(default_script, unavailable_on=lambda c: c["schema"] is Checkpoint)
+    rig = Rig(gw)
+    await rig.run()
+    assert len(rig.calls(lambda c: c["schema"] is Checkpoint)) == 1
+    assert rig.named("await_rebuttal") == []
+    assert rig.calls(is_verdict) == []
+    assert rig.named("done") == [{"status": "partial"}]
+
+
+async def test_refused_final_turn_stops_the_round():
+    gw = FakeGateway(default_script, unavailable_on=lambda c: in_round(c, 3))
+    rig = Rig(gw)
+    await rig.run()
+    assert len(rig.calls(lambda c: in_round(c, 3))) == 1
+    assert rig.calls(is_verdict) == []
+    assert rig.named("done") == [{"status": "partial"}]
+
+
+async def test_refused_judge_falls_back_as_partial():
+    gw = FakeGateway(default_script, unavailable_on=is_verdict)
+    rig = Rig(gw)
+    await rig.run()
+    assert len(rig.calls(is_verdict)) == 1
+    assert rig.named("verdict")[0]["fallback"] is True
+    assert rig.named("done") == [{"status": "partial"}]
+
+
+async def test_budget_stop_is_not_relabelled_partial():
+    rig = Rig(MAX_TURNS=6)
+    await rig.run()
+    assert rig.named("done") == [{"status": "budget_exceeded"}]
 
 
 async def test_persona_failure_uses_neutral_default_and_continues():

@@ -61,7 +61,7 @@ export default function Verdict() {
     )
   }
 
-  const partial = verdict.fallback || debate.status === 'budget_exceeded'
+  const partial = verdict.fallback || debate.status === 'budget_exceeded' || debate.status === 'partial'
 
   async function share() {
     try {

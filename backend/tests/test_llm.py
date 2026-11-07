@@ -9,7 +9,7 @@ from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from app.config import get_settings
 from app.fake_llm import FakeGateway
-from app.llm import LLMError, LLMRefusal, OpenRouterGateway, get_gateway
+from app.llm import LLMError, LLMRefusal, LLMUnavailable, OpenRouterGateway, get_gateway
 from app.models import FinalPosition, Verdict
 from app.verdict import check_consistency
 
@@ -172,6 +172,53 @@ async def test_midstream_error_raises_llmerror():
         async for p in gw.stream_text("agent", "s", "u", lambda u: None):
             seen.append(p)
     assert seen == ["partial "]
+
+
+async def test_truncated_stream_raises_after_reporting_usage():
+    """Usage arrives on the chunk after finish_reason, so the error has to wait for it."""
+    usage = {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8, "cost": 0.002}
+    gw = OpenRouterGateway(StubClient([chunk("cut "), chunk("off", finish="length"), chunk(None, usage=usage)]))
+    text, reported = [], []
+    with pytest.raises(LLMError, match="truncated"):
+        async for piece in gw.stream_text("agent", "s", "u", reported.append):
+            text.append(piece)
+    assert text == ["cut ", "off"]
+    assert [(u.tokens_in, u.tokens_out) for u in reported] == [(5, 3)]
+
+
+@pytest.mark.parametrize(
+    ("cls", "code"),
+    [(openai.AuthenticationError, 401), (openai.APIStatusError, 402), (openai.PermissionDeniedError, 403)],
+)
+async def test_refused_credentials_or_credits_raise_llmunavailable(cls, code):
+    gw = OpenRouterGateway(StubClient(exc=_status_error(cls, code)))
+    with pytest.raises(LLMUnavailable, match=str(code)):
+        await gw.structured("agent", "s", "u", FinalPosition)
+    with pytest.raises(LLMUnavailable):
+        await collect(gw)
+
+
+async def test_other_provider_errors_are_not_llmunavailable():
+    for cls, code in ((openai.RateLimitError, 429), (openai.InternalServerError, 502)):
+        gw = OpenRouterGateway(StubClient(exc=_status_error(cls, code)))
+        with pytest.raises(LLMError) as ei:
+            await gw.structured("agent", "s", "u", FinalPosition)
+        assert not isinstance(ei.value, LLMUnavailable)
+
+
+async def test_midstream_402_raises_llmunavailable():
+    err = {"code": 402, "message": "insufficient credits"}
+    gw = OpenRouterGateway(StubClient([chunk(None, finish="error", error=err)]))
+    with pytest.raises(LLMUnavailable):
+        await collect(gw)
+
+
+async def test_error_body_402_on_structured_raises_llmunavailable():
+    reply = completion(json.dumps(POSITION))
+    reply.model_extra["error"] = {"code": 402, "message": "insufficient credits"}
+    gw = OpenRouterGateway(StubClient(reply))
+    with pytest.raises(LLMUnavailable):
+        await gw.structured("agent", "s", "u", FinalPosition)
 
 
 async def test_stream_yields_text_and_reports_usage_from_final_chunk():

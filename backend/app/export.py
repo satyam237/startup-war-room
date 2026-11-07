@@ -4,9 +4,10 @@ from typing import Any
 
 DISCLAIMER = "AI critique for brainstorming, not professional advice."
 PARTIAL_NOTE = (
-    "**Partial result:** the debate stopped early, so this verdict is a fallback built from "
-    "what was said so far."
+    "**Partial result:** the debate ended early or the verdict used a simpler fallback, so "
+    "treat these scores with extra caution."
 )
+PARTIAL_STATUSES = ("budget_exceeded", "partial")
 AGENT_NAMES = {
     "vc": "Skeptical VC", "customer": "Customer", "cto": "CTO", "competitor": "Competitor",
     "moderator": "Moderator",
@@ -69,7 +70,7 @@ def render_markdown(debate: dict[str, Any]) -> str:
         out += ["## Founder rebuttal", "", quote(debate["rebuttal"]), ""]
 
     out += ["## Verdict", ""]
-    if verdict["fallback"]:
+    if verdict["fallback"] or debate["status"] in PARTIAL_STATUSES:
         out += [PARTIAL_NOTE, ""]
     out += [
         f"**Recommendation:** {RECOMMENDATIONS.get(verdict['recommendation'], verdict['recommendation'])} "

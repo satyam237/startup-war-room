@@ -36,6 +36,7 @@ REASONING_EFFORT: dict[str, str] = {
 # Agent turns are ~600 visible tokens; headroom is left because reasoning tokens
 # count against the limit.
 MAX_TOKENS: dict[str, int] = {"fast": 1000, "agent": 1500, "judge": 16000, "escalation": 16000}
+REFUSED_STATUSES = (401, 402, 403)
 
 
 class Usage(BaseModel):
@@ -54,6 +55,11 @@ class LLMError(Exception):
 
 class LLMRefusal(LLMError):
     pass
+
+
+class LLMUnavailable(LLMError):
+    """The provider refused the key or the account (HTTP 401, 402, 403). No call can succeed,
+    so callers stop instead of retrying or failing open. The message never quotes the provider."""
 
 
 class LLMGateway(Protocol):
@@ -129,6 +135,19 @@ def _usage_from(
     return usage
 
 
+def _refused(status: Any) -> LLMUnavailable:
+    return LLMUnavailable(f"provider refused the call (HTTP {status})")
+
+
+def _body_error(err: Any, label: str) -> LLMError:
+    """An error delivered in a 200 response, which OpenRouter does on streams and some replies."""
+    code = err.get("code") if isinstance(err, dict) else None
+    if code in REFUSED_STATUSES:
+        return _refused(code)
+    msg = err.get("message") if isinstance(err, dict) else str(err)
+    return LLMError(f"{label}: {msg}")
+
+
 def _map_sdk_error(exc: Exception) -> LLMError:
     # Most specific first.
     if isinstance(exc, openai.RateLimitError):
@@ -138,6 +157,8 @@ def _map_sdk_error(exc: Exception) -> LLMError:
     if isinstance(exc, openai.APIConnectionError):
         return LLMError(f"connection error: {exc}")
     if isinstance(exc, openai.APIStatusError):
+        if exc.status_code in REFUSED_STATUSES:
+            return _refused(exc.status_code)
         return LLMError(f"provider returned HTTP {exc.status_code}: {exc}")
     if isinstance(exc, openai.OpenAIError):
         return LLMError(f"provider error: {exc}")
@@ -147,8 +168,7 @@ def _map_sdk_error(exc: Exception) -> LLMError:
 def _check_midstream_error(chunk: Any) -> None:
     err = _extra(chunk, "error")
     if err:
-        msg = err.get("message") if isinstance(err, dict) else str(err)
-        raise LLMError(f"error mid-stream: {msg}")
+        raise _body_error(err, "error mid-stream")
 
 
 class OpenRouterGateway:
@@ -185,6 +205,7 @@ class OpenRouterGateway:
         raw_usage = None
         status = "ok"
         stream = None
+        truncated = False
         try:
             stream = await self._client.chat.completions.create(stream=True, **req)
             async for chunk in stream:
@@ -198,8 +219,12 @@ class OpenRouterGateway:
                         raise LLMRefusal("response blocked by content filter")
                     if choice.finish_reason == "error":
                         raise LLMError("stream ended with finish_reason=error")
+                    if choice.finish_reason == "length":
+                        truncated = True  # raised after the loop: usage is on a later chunk
                     if choice.delta.content:
                         yield choice.delta.content
+            if truncated:
+                raise LLMError("text output truncated (finish_reason=length)")
         except LLMError:
             status = "failed"
             raise
@@ -244,7 +269,7 @@ class OpenRouterGateway:
             raise _map_sdk_error(exc) from exc
         err = _extra(resp, "error")
         if err:
-            raise LLMError(f"provider error: {err}")
+            raise _body_error(err, "provider error")
         if not resp.choices:
             raise LLMError("provider returned no choices")
         usage = _usage_from(resp.usage, req["model"], started, tier)

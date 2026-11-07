@@ -1,6 +1,7 @@
 import pytest
 
 from app.fake_llm import FakeGateway
+from app.llm import LLMUnavailable, Usage
 from app.models import Verdict
 from app.verdict import check_consistency, fallback_verdict, generate_verdict
 
@@ -294,3 +295,18 @@ async def test_ladder_stops_when_the_caller_says_so():
     v = await generate_verdict(gw, STATE, may_continue=lambda: False)
     assert v.fallback is True
     assert len(gw.calls) == 1
+
+
+async def test_refused_provider_ends_the_ladder_and_reports_usage():
+    class Refused(FakeGateway):
+        async def structured(self, tier, system, user, schema, app_fields=None):
+            self.calls.append(tier)
+            exc = LLMUnavailable("provider refused the call (HTTP 402)")
+            exc.usage = Usage(model="fake", tokens_in=3, tokens_out=0, cost_usd=0.0, latency_ms=0)
+            raise exc
+
+    gw, seen = Refused(), []
+    with pytest.raises(LLMUnavailable):
+        await generate_verdict(gw, {"pitch": "x"}, on_usage=seen.append)
+    assert gw.calls == ["judge"]
+    assert [u.tokens_in for u in seen] == [3]

@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.llm import LLMError, LLMRefusal, Tier, Usage
+from app.llm import LLMError, LLMRefusal, LLMUnavailable, Tier, Usage
 from app.models import Verdict
 
 _VOICES = [
@@ -135,7 +135,7 @@ class FakeGateway:
     """script(call) may return str (stream), BaseModel/dict (structured), or None for defaults.
 
     call = {"kind": "stream"|"structured", "tier", "system", "user", "schema"}.
-    fail_on / refuse_on: substring of system+user, or predicate(call) -> bool.
+    fail_on / refuse_on / unavailable_on: substring of system+user, or predicate(call) -> bool.
     """
 
     def __init__(
@@ -144,12 +144,14 @@ class FakeGateway:
         *,
         fail_on: Matcher = None,
         refuse_on: Matcher = None,
+        unavailable_on: Matcher = None,
         delay_s: float | None = None,
         usage_per_call: tuple[int, int, float] | None = None,
     ) -> None:
         self.script = script
         self.fail_on = fail_on
         self.refuse_on = refuse_on
+        self.unavailable_on = unavailable_on
         self._delay_s = delay_s  # None -> settings.FAKE_DELAY_S, read per call
         self.usage_per_call = usage_per_call  # (tokens_in, tokens_out, cost_usd)
         self.calls: list[dict[str, Any]] = []
@@ -167,6 +169,8 @@ class FakeGateway:
 
     def _gate(self, call: dict[str, Any]) -> None:
         self.calls.append(call)
+        if _matches(self.unavailable_on, call):
+            raise LLMUnavailable("provider refused the call (HTTP 402)")
         if _matches(self.refuse_on, call):
             raise LLMRefusal("fake refusal")
         if _matches(self.fail_on, call):

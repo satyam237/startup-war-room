@@ -5,7 +5,7 @@ import pytest
 
 from app.fake_llm import FakeGateway
 from app.guards import IntakeResult, intake, is_repeat, wrap_untrusted
-from app.llm import Usage
+from app.llm import LLMUnavailable, Usage
 
 PITCH = "An app that matches freelance designers with early-stage startups for fixed-price sprints."
 
@@ -124,3 +124,13 @@ async def test_thin_without_questions_is_not_thin():
 async def test_intake_non_serialisable_meta_does_not_escape():
     res = await intake(FakeGateway(), PITCH, {"when": datetime.date(2026, 1, 1), "s": {1, 2}})
     assert res.allowed is True
+
+
+async def test_intake_does_not_fail_open_when_the_provider_refuses_the_key():
+    with pytest.raises(LLMUnavailable):
+        await intake(FakeGateway(unavailable_on=lambda _: True), PITCH, {})
+
+
+async def test_repeat_check_does_not_fail_open_when_the_provider_refuses_the_key():
+    with pytest.raises(LLMUnavailable):
+        await is_repeat(FakeGateway(unavailable_on=lambda _: True), "new", ["old"])

@@ -18,7 +18,7 @@ from app.config import get_settings
 from app.events import Event
 from app.export import render_markdown
 from app.guards import IntakeResult, intake
-from app.llm import Usage, get_gateway
+from app.llm import LLMUnavailable, Usage, get_gateway
 from app.ratelimit import client_ip
 from app.runner import FAILED_MESSAGE, DebateRunner, RebuttalNotOpen, RunnerFull
 
@@ -34,6 +34,7 @@ PING_S = 15
 INTAKE_TIMEOUT_S = 20
 CLIENT_CLOSED_REQUEST = 499
 AT_CAPACITY = "The war room is at capacity. Try again in a minute."
+PROVIDER_DOWN = "The war room cannot reach its AI provider right now. Try again later."
 TOO_MANY = "Too many requests from this address. Try again later."
 MAX_COMMENT_CHARS = 2000
 # `GET /debates/{id}` is public by unguessable id, so it lists what it returns. The delete
@@ -88,6 +89,9 @@ async def create_debate(body: CreateDebate, request: Request) -> dict[str, str] 
     except TimeoutError:  # fails open, like any other intake failure
         logger.warning("intake hit its time limit, allowing the pitch")
         screened = IntakeResult(allowed=True)
+    except LLMUnavailable as exc:
+        logger.error("intake could not run, refusing the pitch: %s", exc)
+        raise HTTPException(503, PROVIDER_DOWN) from None
     if not screened.allowed:
         raise HTTPException(422, screened.refusal_reason)
     if screened.thin and not body.skip_clarify:

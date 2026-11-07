@@ -11,6 +11,11 @@ only JUDGE_RESERVE_S is left, and the deadline itself cuts off whatever is still
 Everything the client sees goes through `Deps.log`, using the SSE contract's event names
 and payloads.
 
+If the provider refuses the key or the account (LLMUnavailable), no further LLM call starts:
+the node sets status `partial`, which jumps to `verdict`. With at least one critic turn on
+record that ends on `fallback_verdict`; with none the debate is `failed`, with no verdict.
+A debate that reaches the verdict with fewer than four final positions is `partial` too.
+
 Two LangGraph behaviours shape the rebuttal step (langgraph 1.2.20, checked by running it):
 - A node re-executes from its first line on resume, so `rebuttal` publishes nothing before
   `interrupt()`. The driver publishes `await_rebuttal`, which also means the client is only
@@ -38,7 +43,7 @@ from app.agents.roster import CRITIC_ORDER, LABELS, critic_prompt
 from app.config import Settings
 from app.events import EventLog
 from app.guards import is_repeat
-from app.llm import LLMError, LLMGateway, Usage
+from app.llm import LLMError, LLMGateway, LLMUnavailable, Usage
 from app.models import FinalPosition, Turn, Verdict
 from app.verdict import fallback_verdict, generate_verdict
 
@@ -50,6 +55,10 @@ LAST_ROUND = 3
 JUDGE_RESERVE_S = 45
 # Below this, a high-effort judge call cannot realistically finish, so it is not started.
 JUDGE_MIN_REMAINING_S = 20
+PROVIDER_DOWN_MESSAGE = (
+    "The AI provider refused this debate's requests, so the panel could not speak. "
+    "Nothing was scored. Please try again later."
+)
 REGENERATE_NOTE = "\n\nYour draft repeated a point already made in the debate. Make a new point."
 
 
@@ -75,9 +84,9 @@ class DebateState(TypedDict):
     rebuttal: str | None
     moderator_notes: list[str]
     final_positions: dict[str, dict[str, Any]]
-    verdict: dict[str, Any] | None  # dumped Verdict
+    verdict: dict[str, Any] | None  # dumped Verdict; stays None on a failed debate
     budget: Budget
-    status: str  # running | complete | failed | budget_exceeded
+    status: str  # running | complete | failed | budget_exceeded | partial
     deadline: float | None  # on Deps.clock's timeline; set when setup starts
 
 
@@ -270,9 +279,14 @@ class _Debate:
     def _meter(self, state: DebateState) -> _Meter:
         return _Meter(state, self.deps.clock, self.deps.on_usage)
 
+    def _provider_down(self, state: DebateState, exc: LLMUnavailable) -> str:
+        logger.error("stopping all LLM calls debate=%s: %s", state["debate_id"], exc)
+        return "partial"
+
     async def setup(self, state: DebateState) -> dict[str, Any]:
         state = {**state, "deadline": self.deps.clock() + self.deps.settings.DEBATE_TIMEOUT_S}
         meter = self._meter(state)
+        status = None
         self.log.publish("setup", {"step": "persona", "message": "Building the customer persona."})
         try:
             if meter.tokens_spent():
@@ -283,7 +297,10 @@ class _Debate:
             persona_note = "Customer persona ready."
             competitor_note = "Competitors identified."
         except (LLMError, TimeoutError) as exc:
-            logger.warning("persona failed, using default debate=%s: %s", state["debate_id"], exc)
+            if isinstance(exc, LLMUnavailable):
+                status = self._provider_down(state, exc)
+            else:
+                logger.warning("persona failed, using default debate=%s: %s", state["debate_id"], exc)
             persona, competitors = _default_persona(state["pitch_meta"]), []
             persona_note = "Could not build a persona, so the debate uses a neutral default."
             competitor_note = "No competitors were named for this debate."
@@ -295,7 +312,7 @@ class _Debate:
             "customer_persona": persona,
             "competitors": competitors,
             "budget": meter.budget,
-            "status": meter.status_after(state),
+            "status": status or meter.status_after(state),
         }
 
     async def _with_retry(
@@ -307,7 +324,10 @@ class _Debate:
         attempts: "itertools.count[int]",
         call: Callable[[], Awaitable[Any]],
     ) -> Any | None:
-        """Announce and run `call`, retrying once on LLMError. None means no try succeeded."""
+        """Announce and run `call`, retrying once on LLMError. None means no try succeeded.
+
+        LLMUnavailable is never retried: it goes up to `_round` once the turn is closed.
+        """
         for _ in range(2):
             if meter.turn_tokens_spent():
                 return None
@@ -317,6 +337,8 @@ class _Debate:
                 return await call()
             except LLMError as exc:
                 meter.add(exc.usage)
+                if isinstance(exc, LLMUnavailable):
+                    raise
                 logger.warning("turn failed turn_id=%s attempt=%d: %s", turn_id, attempt, exc)
         return None
 
@@ -362,6 +384,7 @@ class _Debate:
         system, user = critic_prompt(agent, view, round)
         attempts = itertools.count(1)
         text: str | None = None
+        refused: LLMUnavailable | None = None
         try:
             async with asyncio.timeout(meter.remaining_s()):
                 text = await self._with_retry(
@@ -379,11 +402,15 @@ class _Debate:
                     text = regenerated or text
         except TimeoutError:
             logger.warning("turn hit the deadline turn_id=%s", turn_id)
+        except LLMUnavailable as exc:
+            refused = exc
         if text is None:
             self.log.publish("turn_reset", {"turn_id": turn_id, "reason": "failed"})
             self._turn_failed(agent, round)
-            return
-        await self._record_turn(meter, view, agent, round, text)
+        else:
+            await self._record_turn(meter, view, agent, round, text)
+        if refused is not None:
+            raise refused
 
     async def _final_turn(self, meter: _Meter, view: dict[str, Any], agent: str, round: int) -> None:
         """A Round 3 turn: structured, never streamed, and exempt from the repeat check."""
@@ -403,6 +430,9 @@ class _Debate:
                 )
         except TimeoutError:
             logger.warning("final turn hit the deadline agent=%s", agent)
+        except LLMUnavailable:
+            self._turn_failed(agent, round)
+            raise
         if position is None:
             self._turn_failed(agent, round)
             return
@@ -424,13 +454,16 @@ class _Debate:
             "final_positions": dict(state["final_positions"]),
         }
         status = state["status"]
-        for agent in CRITIC_ORDER:
-            if meter.exhausted():
-                status = "budget_exceeded"
-                break
-            await play_turn(meter, view, agent, round)
-        if round < LAST_ROUND:  # after the last turn nothing is left to cut short
-            status = meter.status_after(state)
+        try:
+            for agent in CRITIC_ORDER:
+                if meter.exhausted():
+                    status = "budget_exceeded"
+                    break
+                await play_turn(meter, view, agent, round)
+            if round < LAST_ROUND:  # after the last turn nothing is left to cut short
+                status = meter.status_after(state)
+        except LLMUnavailable as exc:
+            status = self._provider_down(state, exc)
         return {
             "round": round,
             "transcript": view["transcript"],
@@ -453,6 +486,7 @@ class _Debate:
         meter.start_turn()
         notes = list(state["moderator_notes"])
         checkpoint = None
+        refused_status = None
         try:
             async with asyncio.timeout(meter.remaining_s()):
                 for _ in range(2):
@@ -462,9 +496,13 @@ class _Debate:
                         checkpoint = await run_checkpoint(self.deps.gw, state, round, on_usage=meter.add)
                         break
                     except LLMError as exc:  # usage already reported by run_checkpoint
+                        if isinstance(exc, LLMUnavailable):
+                            raise
                         logger.warning("checkpoint failed round=%d: %s", round, exc)
         except TimeoutError:
             logger.warning("checkpoint hit the deadline round=%d", round)
+        except LLMUnavailable as exc:
+            refused_status = self._provider_down(state, exc)
         if checkpoint is None:
             self._turn_failed("moderator", round)
         else:
@@ -481,7 +519,7 @@ class _Debate:
         return {
             "moderator_notes": notes,
             "budget": meter.budget,
-            "status": meter.status_after(state),
+            "status": refused_status or meter.status_after(state),
         }
 
     async def moderator_1(self, state: DebateState) -> dict[str, Any]:
@@ -504,7 +542,12 @@ class _Debate:
         meter = self._meter(state)
         remaining = meter.remaining_s()
         status = state["status"]
-        if not state["transcript"]:
+        if status == "partial":  # the provider refused a call, so nothing more may start
+            if not state["transcript"]:
+                self.log.publish("error", {"message": PROVIDER_DOWN_MESSAGE, "recoverable": False})
+                return {"budget": meter.budget, "status": "failed"}
+            result = fallback_verdict(state)
+        elif not state["transcript"]:
             result = fallback_verdict(state)  # nothing to judge
         elif meter.tokens_spent() or remaining < JUDGE_MIN_REMAINING_S:
             result, status = fallback_verdict(state), "budget_exceeded"
@@ -520,13 +563,18 @@ class _Debate:
             except TimeoutError:
                 logger.warning("judge hit the deadline debate=%s", state["debate_id"])
                 result, status = fallback_verdict(state), "budget_exceeded"
+            except LLMUnavailable as exc:
+                result, status = fallback_verdict(state), self._provider_down(state, exc)
+        if status == "running" and any(a not in state["final_positions"] for a in CRITIC_ORDER):
+            status = "partial"
         self.log.publish("verdict", result.model_dump(mode="json"))
         return {"verdict": result.model_dump(mode="json"), "budget": meter.budget, "status": status}
 
     async def report(self, state: DebateState) -> dict[str, Any]:
         status = "complete" if state["status"] == "running" else state["status"]
         debate_id, budget = state["debate_id"], state["budget"]
-        await self.deps.store.save_verdict(debate_id, Verdict.model_validate(state["verdict"]))
+        if state["verdict"] is not None:
+            await self.deps.store.save_verdict(debate_id, Verdict.model_validate(state["verdict"]))
         await self.deps.store.update_debate(
             debate_id, status=status, total_tokens=budget["tokens_used"], est_cost=budget["cost_usd"]
         )

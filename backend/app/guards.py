@@ -1,8 +1,10 @@
 """Input guards: untrusted-text delimiting, pitch intake, and repetition check.
 
 All LLM calls use the `fast` tier. Both guards fail open: an LLM failure must not
-block or stall a debate. Token usage is reported through an optional `on_usage`
-callback (also on failed calls, via `exc.usage`) so callers can account for it.
+block or stall a debate. The exception is LLMUnavailable, which is raised on: a refused
+key or account means no debate can run, so there is nothing to keep moving. Token usage
+is reported through an optional `on_usage` callback (also on failed calls, via
+`exc.usage`) so callers can account for it.
 """
 
 import json
@@ -15,7 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.llm import LLMError, LLMGateway, LLMRefusal, Usage
+from app.llm import LLMError, LLMGateway, LLMRefusal, LLMUnavailable, Usage
 
 logger = logging.getLogger("app.guards")
 
@@ -102,6 +104,9 @@ async def intake(
     except LLMRefusal as exc:
         _record_usage(on_usage, exc.usage)
         return IntakeResult(allowed=False, refusal_reason=DEFAULT_REFUSAL)
+    except LLMUnavailable as exc:
+        _record_usage(on_usage, exc.usage)
+        raise
     except LLMError as exc:
         _record_usage(on_usage, exc.usage)
         logger.warning("intake failed open: %s", exc)
@@ -124,6 +129,9 @@ async def is_repeat(
     user = f"{wrap_untrusted('new_turn', new_text)}\n{wrap_untrusted('earlier_turns', prior)}"
     try:
         verdict, usage = await gw.structured("fast", _REPEAT_SYSTEM, user, _RepeatVerdict)
+    except LLMUnavailable as exc:
+        _record_usage(on_usage, exc.usage)
+        raise
     except LLMError as exc:
         _record_usage(on_usage, exc.usage)
         logger.warning("repeat check failed open: %s", exc)

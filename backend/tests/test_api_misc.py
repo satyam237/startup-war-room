@@ -57,6 +57,15 @@ async def test_export_omits_rebuttal_when_absent_and_labels_fallback(client):
     assert "partial" in body.lower()
 
 
+@pytest.mark.parametrize("status", ["budget_exceeded", "partial"])
+async def test_export_labels_a_real_verdict_from_a_debate_that_stopped_short(client, status):
+    debate_id = await finished_debate(fallback=False)
+    await db.update_debate(debate_id, status=status)
+    body = (await client.get(f"/debates/{debate_id}/export")).text
+    assert "Partial result" in body
+    assert "fallback built from" not in body  # the judge wrote this verdict
+
+
 async def test_render_markdown_is_pure(client):
     debate_id = await finished_debate()
     debate = await db.get_debate(debate_id)

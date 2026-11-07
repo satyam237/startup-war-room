@@ -51,6 +51,8 @@ def show(e: Event) -> None:
             print(f"  risk {item['rank']} [{item['severity']}] {item['raised_by']}: {item['risk']}")
         for item in d["experiments"]:
             print(f"  experiment ({item['timebox_days']}d): {item['test']}")
+    elif e.event == "error":
+        print(f"\n[error] {d['message']}")
     elif e.event == "done":
         print(f"\n[done] status={d['status']}")
 

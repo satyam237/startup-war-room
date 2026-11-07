@@ -10,7 +10,7 @@ import RoundIndicator from '../components/RoundIndicator'
 import Transcript from '../components/Transcript'
 
 const MAX_TURNS = 14
-const FINISHED = ['complete', 'budget_exceeded']
+const FINISHED = ['complete', 'budget_exceeded', 'partial']
 const LEFT: AgentId[] = ['vc', 'customer']
 const RIGHT: AgentId[] = ['cto', 'competitor']
 const LOST_MESSAGE = 'The connection to this debate was lost, and it did not finish. Start a new debate to try again.'

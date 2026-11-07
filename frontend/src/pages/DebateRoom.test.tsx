@@ -172,6 +172,13 @@ describe('DebateRoom', () => {
     expect(await screen.findByText('verdict page')).toBeInTheDocument()
   })
 
+  it('navigates to the verdict on done partial', async () => {
+    setup()
+    await connected()
+    emit('done', { status: 'partial' })
+    expect(await screen.findByText('verdict page')).toBeInTheDocument()
+  })
+
   it('redirects to the verdict when the debate is already complete', async () => {
     fetchMock.mockImplementation(() => json(200, { status: 'complete', verdict: { overall: 1 } }))
     setup()

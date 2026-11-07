@@ -13,6 +13,7 @@ import report  # noqa: E402
 import run_evals  # noqa: E402
 from app import llm  # noqa: E402
 from app.config import get_settings  # noqa: E402
+from app.fake_llm import FakeGateway  # noqa: E402
 from app.llm import LLMError  # noqa: E402
 
 
@@ -59,6 +60,36 @@ def test_report_metrics_on_canned_results():
     assert s["agreement_collapse_rate"] == pytest.approx(1 / 3)  # a only, of a, b, c
     assert s["meaningful"] is True
     assert "NOT MEANINGFUL" not in report.format_report(s)
+
+
+def test_partial_debates_are_not_completed():
+    results = [
+        canned(), canned(status="partial", fallback=True, schema_valid=False, consistency_errors=None),
+        canned(status="partial"),
+    ]
+    s = report.summarize(results, "openrouter")
+    assert s["completion_rate"] == pytest.approx(1 / 3)
+    assert s["partial_count"] == 2
+    assert "partial debates:         2" in report.format_report(s)
+
+
+def test_refused_provider_stops_the_run_on_the_failed_status(tmp_path):
+    llm.set_gateway(FakeGateway(unavailable_on=lambda _: True))
+    out = tmp_path / "r.json"
+    assert run_evals.main(["--concurrency", "1", "--out", str(out)]) != 0
+    data = json.loads(out.read_text())
+    assert data["meta"]["stop_reason"] == "same_failure"
+    assert [r["status"] for r in data["results"]] == ["failed"] * run_evals.FAIL_STREAK
+    assert "HTTP 402" in data["results"][0]["cause"]
+
+
+def test_refused_provider_stops_the_run_on_the_partial_status(tmp_path):
+    llm.set_gateway(FakeGateway(unavailable_on=lambda c: c["tier"] == "judge"))
+    out = tmp_path / "r.json"
+    assert run_evals.main(["--concurrency", "1", "--out", str(out)]) != 0
+    data = json.loads(out.read_text())
+    assert data["meta"]["stop_reason"] == "same_failure"
+    assert [r["status"] for r in data["results"]] == ["partial"] * run_evals.FAIL_STREAK
 
 
 def test_fallback_verdict_is_never_schema_valid_success():

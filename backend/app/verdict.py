@@ -1,6 +1,7 @@
-"""Verdict engine: turns a finished debate into a validated Verdict, and never raises.
+"""Verdict engine: turns a finished debate into a validated Verdict.
 
 Ladder: judge -> judge retry (errors appended) -> escalation repair -> fallback_verdict.
+The one thing it raises is LLMUnavailable, because the caller must stop all LLM calls.
 """
 
 import logging
@@ -12,7 +13,7 @@ from app.agents import field
 from app.agents.moderator import verdict_prompt
 from app.agents.roster import CRITIC_ORDER, LABELS
 from app.guards import UsageSink
-from app.llm import LLMError, LLMGateway
+from app.llm import LLMError, LLMGateway, LLMUnavailable
 from app.models import Experiment, Risk, Scorecard, ScoreItem, Verdict
 
 logger = logging.getLogger("app.verdict")
@@ -75,6 +76,8 @@ async def _attempt(
         v, usage = await gw.structured(tier, system, user, Verdict, app_fields={"fallback"})
     except Exception as exc:  # LLMError or anything else; CancelledError is BaseException and propagates
         _report(on_usage, getattr(exc, "usage", None))
+        if isinstance(exc, LLMUnavailable):
+            raise
         if not isinstance(exc, LLMError):
             logger.exception("verdict attempt failed unexpectedly")
         return None, [f"the previous call failed: {exc}"]
@@ -96,12 +99,15 @@ async def generate_verdict(
     on_usage: UsageSink = None,
     may_continue: Callable[[], bool] = lambda: True,
 ) -> Verdict:
-    """Always returns a Verdict: validated if any rung succeeds, else fallback_verdict.
+    """Returns a Verdict: validated if any rung succeeds, else fallback_verdict.
 
     `may_continue` is asked before every rung after the first; False ends the ladder there.
+    Raises LLMUnavailable, after reporting any billed usage, and starts no further rung.
     """
     try:
         return await _ladder(gw, state, on_usage, may_continue)
+    except LLMUnavailable:
+        raise
     except Exception:
         logger.exception("verdict ladder failed; using fallback")
         return fallback_verdict(state)

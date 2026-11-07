@@ -165,6 +165,12 @@ describe('Verdict page', () => {
     expect(await screen.findByText(/partial result/i)).toBeInTheDocument()
   })
 
+  it('shows a partial-result notice on a partial debate with a real verdict', async () => {
+    fetchMock.mockReturnValue(json(200, { ...debate, status: 'partial' }))
+    setup()
+    expect(await screen.findByText(/partial result/i)).toBeInTheDocument()
+  })
+
   it('handles a missing debate', async () => {
     fetchMock.mockReturnValue(json(404, { detail: 'Not found' }))
     setup()

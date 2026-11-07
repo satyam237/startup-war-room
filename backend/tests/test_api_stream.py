@@ -443,6 +443,37 @@ async def test_intake_tokens_count_against_the_debate(client, monkeypatch):
     assert stored["total_tokens"] == 100 and stored["est_cost"] == 0.25
 
 
+async def test_refused_provider_fails_the_debate_with_a_clear_error(client):
+    # Intake is scripted to pass, so the refusal first lands inside the debate.
+    install(FakeGateway(unavailable_on=lambda c: "You screen startup pitches" not in c["system"]))
+    debate_id = await create(client)
+    await wait_finished(debate_id)
+    events = parse_sse((await client.get(f"/debates/{debate_id}/stream")).text)
+    assert named(events, "done") == [{"status": "failed"}]
+    stored = await db.get_debate(debate_id)
+    assert stored["status"] == "failed" and stored["verdict"] is None
+    assert (await client.get(f"/debates/{debate_id}/export")).status_code == 409
+
+
+async def test_refused_provider_at_intake_starts_no_debate(client):
+    install(FakeGateway(unavailable_on=lambda _: True))
+    r = await client.post("/debates", json=BODY)
+    assert r.status_code == 503
+    assert "provider" in r.json()["detail"]
+    assert runner().active_count() == 0
+
+
+async def test_partial_debate_replays_its_verdict_and_status(client, monkeypatch):
+    configure(monkeypatch, REBUTTAL_TIMEOUT_S=0.01)
+    install(FakeGateway(unavailable_on=lambda c: c["tier"] == "judge"))
+    debate_id = await create(client)
+    await wait_finished(debate_id)
+    runner().evict_log(debate_id)
+    events = parse_sse((await client.get(f"/debates/{debate_id}/stream")).text)
+    assert named(events, "done") == [{"status": "partial"}]
+    assert named(events, "verdict")[0]["fallback"] is True
+
+
 async def test_concurrency_cap_503(client, monkeypatch):
     configure(monkeypatch, MAX_CONCURRENT_DEBATES=1)
     gateway = install(FakeGateway())
