@@ -26,4 +26,17 @@ describe('ThemeSwitcher', () => {
     render(<ThemeSwitcher />)
     expect(screen.getByRole('radio', { name: /courtside/i })).toHaveAttribute('aria-checked', 'true')
   })
+
+  it('is one tab stop, and the arrow keys move and choose like a radio group', async () => {
+    render(<ThemeSwitcher />)
+    const radios = screen.getAllByRole('radio')
+    expect(radios.map((r) => r.tabIndex)).toEqual([0, -1, -1, -1])
+    radios[0].focus()
+    await userEvent.keyboard('{ArrowRight}')
+    expect(radios[1]).toHaveFocus()
+    expect(radios[1]).toHaveAttribute('aria-checked', 'true')
+    expect(document.documentElement.dataset.theme).toBe(THEMES[1].id)
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
+    expect(radios[THEMES.length - 1]).toHaveFocus() // wraps
+  })
 })

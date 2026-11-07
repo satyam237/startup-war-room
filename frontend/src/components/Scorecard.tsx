@@ -77,10 +77,9 @@ export default function Scorecard({ scorecard }: { scorecard: ScorecardData }) {
           return (
             <li
               key={key}
-              className="group relative grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-4 gap-y-1 px-4 py-3 transition-colors duration-150 hover:bg-panel-hi focus:bg-panel-hi sm:px-5 lg:grid-cols-[5rem_13rem_minmax(0,1fr)] lg:gap-x-6"
-              tabIndex={0}
+              className="group relative grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-4 gap-y-1 px-4 py-3 transition-colors duration-150 hover:bg-panel-hi sm:px-5 lg:grid-cols-[5rem_13rem_minmax(0,1fr)] lg:gap-x-6"
             >
-              <span className="display text-6xl leading-none transition-transform duration-150 group-hover:scale-110 group-focus:scale-110">
+              <span className="display text-6xl leading-none transition-transform duration-150 group-hover:scale-110">
                 <CountUp value={score} delay={0.15 + i * 0.1} />
                 <span className="font-ui text-base font-bold normal-case text-muted">/10</span>
               </span>

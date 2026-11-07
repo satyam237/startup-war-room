@@ -33,8 +33,8 @@ export default function RiskList({ risks, lit, onLit }: Props) {
               data-lit={on}
               onPointerEnter={() => onLit(agent)}
               onPointerLeave={() => onLit(null)}
-              className={`surface grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-4 p-4 transition-shadow duration-150 ${lit && !on ? 'opacity-55!' : ''}`}
-              style={on ? { boxShadow: '8px 8px 0 var(--agent)' } : undefined}
+              className="surface grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-4 p-4 transition-shadow duration-150"
+              style={on ? { boxShadow: '8px 8px 0 var(--agent)', borderColor: 'var(--agent-ink)' } : undefined}
             >
               <span className="display grid size-14 place-items-center rounded border-[3px] border-line text-4xl text-fill-ink" style={{ background: SEV_FILL[r.severity] ?? SEV_FILL.low }}>
                 {r.rank}

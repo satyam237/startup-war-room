@@ -260,7 +260,13 @@
   transition: box-shadow 0.15s, transform 0.15s;
 }
 .field::placeholder { color: var(--color-muted); opacity: 0.85; }
-.field:focus { outline: none; box-shadow: 4px 4px 0 var(--agent-ink, var(--color-shade)); transform: translate(-2px, -2px); }
+.field:focus { outline: 3px solid transparent; outline-offset: 2px; box-shadow: 4px 4px 0 var(--agent-ink, var(--color-shade)); transform: translate(-2px, -2px); }
+
+/* Forced colours drop box-shadows, so focus falls back to a real outline. The transparent outline above turns visible there. */
+@media (forced-colors: active) {
+  .field:focus { outline-color: Highlight; }
+  .slab:disabled { border-color: GrayText; color: GrayText; }
+}
 
 /* ---- Motion that CSS does best ---- */
 

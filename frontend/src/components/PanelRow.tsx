@@ -29,7 +29,7 @@ export default function PanelRow({ risks, lit, onLit }: Props) {
             key={a}
             data-agent={a}
             data-lit={on}
-            animate={calm ? undefined : { y: on ? -6 : 0, scale: on ? 1.07 : 1, opacity: lit && !on ? 0.55 : 1 }}
+            animate={calm ? undefined : { y: on ? -6 : 0 }}
             transition={{ type: 'spring', stiffness: 460, damping: 20 }}
           >
             <button

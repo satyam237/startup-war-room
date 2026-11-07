@@ -23,7 +23,14 @@ describe('CountUp', () => {
 
   it('holds the real score in the page until it is seen, so printing or reading it never shows 0', () => {
     render(<CountUp value={7} />)
-    expect(screen.getByText('7')).toHaveAttribute('data-score')
+    expect(document.querySelector('[data-score]')).toHaveTextContent('7')
+  })
+
+  it('reads out only the real score, never the numbers it counts through', () => {
+    vi.mocked(Element.prototype.getBoundingClientRect).mockReturnValue({ top: 10 } as DOMRect)
+    render(<CountUp value={7} />)
+    expect(document.querySelector('[data-score]')).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByText('7')).not.toHaveAttribute('aria-hidden') // the stable value for assistive tech
   })
 
   it('counts from zero once it is seen, and ends on the real score', async () => {

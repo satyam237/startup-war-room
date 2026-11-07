@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { animate } from 'motion/react'
 import { useCalm } from './useCalm'
 import { useSeen } from './useSeen'
@@ -11,45 +11,47 @@ interface Props {
 }
 
 /**
- * Counts 0 up to `value` the first time it is on screen. Until then the page holds the real number,
- * so a score nobody has scrolled to is still right when printed or read aloud. Calm visitors get the number at once.
+ * Counts 0 up to `value` the first time it is on screen. Until then the page shows the real number, so a score
+ * nobody has scrolled to is still right when printed. The counting digits are hidden from assistive tech, which
+ * reads one stable value instead. Calm visitors get the number at once.
  */
 export default function CountUp({ value, delay = 0, className }: Props) {
   const calm = useCalm()
   const ref = useRef<HTMLSpanElement>(null)
   const seen = useSeen(ref)
+  const [shown, setShown] = useState(value)
+  const printing = useRef(false)
+  const run = useRef<ReturnType<typeof animate> | null>(null)
 
   // On screen from the start: begin at zero before the first paint, so the final number never flashes.
   useLayoutEffect(() => {
     const el = ref.current
-    if (el && !calm && el.getBoundingClientRect().top < window.innerHeight) el.textContent = '0'
+    if (el && !calm && el.getBoundingClientRect().top < window.innerHeight) setShown(0)
   }, [calm])
 
-  const printing = useRef(false)
-  const run = useRef<ReturnType<typeof animate> | null>(null)
-
   useEffect(() => {
-    const el = ref.current
-    if (!el || calm || !seen || printing.current) return
-    el.textContent = '0'
+    if (calm || printing.current) { setShown(value); return }
+    if (!seen) return // keeps the real number, or the zero it starts from when on screen
+    setShown(0)
     run.current = animate(0, value, {
       duration: 0.7 + value * 0.07,
       delay,
       ease: [0.16, 1, 0.3, 1],
-      onUpdate: (v) => { el.textContent = String(Math.round(v)) },
+      onUpdate: (v) => setShown(Math.round(v)),
     })
-    return () => { run.current?.stop(); el.textContent = String(value) }
+    return () => { run.current?.stop(); setShown(value) }
   }, [calm, seen, value, delay])
 
   useEffect(() => {
-    const settle = () => {
-      printing.current = true
-      run.current?.stop()
-      if (ref.current) ref.current.textContent = String(value)
-    }
+    const settle = () => { printing.current = true; run.current?.stop(); setShown(value) }
     window.addEventListener('beforeprint', settle)
     return () => window.removeEventListener('beforeprint', settle)
   }, [value])
 
-  return <span ref={ref} data-score className={className}>{value}</span>
+  return (
+    <>
+      <span className="sr-only">{value}</span>
+      <span ref={ref} aria-hidden="true" data-score className={className}>{shown}</span>
+    </>
+  )
 }
