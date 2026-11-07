@@ -84,4 +84,20 @@ describe('Transcript', () => {
     rerender(<Transcript state={debateReducer(second, token(' three'))} />)
     expect(log.scrollTop).toBe(1000) // following again
   })
+
+  it('keeps following when content grows just before a scroll event lands', () => {
+    const start: DebateAction = { type: 'turn_start', data: { turn_id: 'r1-vc', agent: 'vc', round: 1, attempt: 1 } }
+    const token = (text: string): DebateAction => ({ type: 'turn_token', data: { turn_id: 'r1-vc', text } })
+    const first = run([start])
+    const { rerender } = render(<Transcript state={first} />)
+    const log = screen.getByRole('log')
+    let height = 1000
+    Object.defineProperty(log, 'clientHeight', { configurable: true, value: 400 })
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => height })
+
+    rerender(<Transcript state={debateReducer(first, token('one'))} />) // the feed follows to 1000
+    height = 1400 // the next turn lands before that scroll's event is delivered
+    fireEvent.scroll(log)
+    expect(screen.queryByRole('button', { name: /jump to latest/i })).not.toBeInTheDocument()
+  })
 })

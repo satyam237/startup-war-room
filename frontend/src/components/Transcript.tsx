@@ -90,6 +90,7 @@ export default function Transcript({ state, pitch }: { state: DebateState; pitch
   const calm = useCalm()
   const ref = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
+  const followedTo = useRef(-1) // where the feed last scrolled itself
   const [away, setAway] = useState(false)
   // Rows that were already there when this mounted (a reload mid-debate) appear without the landing animation.
   const restored = useRef(state.feed.length)
@@ -99,11 +100,16 @@ export default function Transcript({ state, pitch }: { state: DebateState; pitch
 
   useEffect(() => {
     const el = ref.current
-    if (el && pinned.current) el.scrollTop = el.scrollHeight
+    if (el && pinned.current) {
+      el.scrollTop = el.scrollHeight
+      followedTo.current = el.scrollTop
+    }
   }, [size])
 
   function onScroll() {
     const el = ref.current!
+    // The event for our own follow-scroll can arrive after more text has landed. That is not the reader leaving.
+    if (el.scrollTop === followedTo.current) return
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM
     pinned.current = near
     setAway(!near)
