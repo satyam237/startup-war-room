@@ -7,7 +7,7 @@
  * WebGPU is tried first where the browser offers it; any WebGPU failure falls back to WASM.
  */
 import { KokoroTTS } from 'kokoro-js'
-import { KOKORO_DTYPE, KOKORO_MODEL } from './cast'
+import { KOKORO_DTYPE, KOKORO_MODEL, KOKORO_MODEL_BYTES } from './cast'
 
 declare const self: DedicatedWorkerGlobalScope
 
@@ -31,8 +31,12 @@ function load(): Promise<KokoroTTS> {
   if (tts) return tts
   const files = new Map<string, { loaded: number; total: number }>()
   const progress_callback = (p: Progress) => {
-    if (p.status !== 'progress' || !p.file || !p.total) return
-    files.set(p.file, { loaded: p.loaded ?? 0, total: p.total })
+    if (p.status !== 'progress' || !p.file) return
+    // Some hosts send no content-length for the weights; the size of the file we ask for is known.
+    const size = p.total || (p.file.endsWith('.onnx') ? KOKORO_MODEL_BYTES : 0)
+    // Small files (config, tokenizer) finish first and would flash the bar to 100 percent; count only the weights.
+    if (size < 1_000_000) return
+    files.set(p.file, { loaded: Math.min(p.loaded ?? 0, size), total: size })
     let loaded = 0
     let total = 0
     for (const f of files.values()) { loaded += f.loaded; total += f.total }

@@ -108,7 +108,7 @@ describe('LiveVoice', () => {
   it('asks before the HD download and shows its size', async () => {
     render(<Room />)
     await userEvent.click(screen.getByRole('radio', { name: 'HD' }))
-    expect(screen.getByRole('group', { name: 'HD voices download' })).toHaveTextContent(/92 MB download/)
+    expect(screen.getByRole('group', { name: 'HD voices download' })).toHaveTextContent(/download of about 100 MB/)
     expect(hd.speak).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
     expect(screen.queryByRole('group', { name: 'HD voices download' })).not.toBeInTheDocument()

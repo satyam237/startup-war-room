@@ -81,11 +81,11 @@ export function HdConsent({ onAccept, onDecline }: { onAccept: () => void; onDec
   return (
     <div role="group" aria-label="HD voices download" className="w-full rounded border-[3px] border-dashed border-line bg-panel-hi px-3 py-2.5">
       <p className="font-body text-sm leading-relaxed">
-        HD voices are a one-time {HD_DOWNLOAD_MB} MB download. Your browser keeps the files for next time,
+        HD voices are a one-time download of about {HD_DOWNLOAD_MB} MB. Your browser keeps the files for next time,
         and the voices run on this device, so the debate text never leaves it.
       </p>
       <div className="mt-2 flex flex-wrap gap-2">
-        <button type="button" onClick={onAccept} className="slab bg-accent px-3 py-1 text-sm text-on-accent">Download HD voices ({HD_DOWNLOAD_MB} MB)</button>
+        <button type="button" onClick={onAccept} className="slab bg-accent px-3 py-1 text-sm text-on-accent">Download HD voices (about {HD_DOWNLOAD_MB} MB)</button>
         <button type="button" onClick={onDecline} className="slab bg-panel px-3 py-1 text-sm text-ink">Not now</button>
       </div>
     </div>

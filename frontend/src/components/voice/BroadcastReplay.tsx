@@ -35,7 +35,7 @@ export default function BroadcastReplay({ debate }: { debate: DebateRecord }) {
     const el = items.current[index]
     const box = list.current
     if (!active || !el || !box) return
-    const top = el.offsetTop - box.offsetTop - 8
+    const top = Math.max(0, el.offsetTop - 8) // the list is position: relative, so offsetTop is measured from its top
     if (top < box.scrollTop || top + el.offsetHeight > box.scrollTop + box.clientHeight) {
       box.scrollTo?.({ top, behavior: calm ? 'auto' : 'smooth' })
     }

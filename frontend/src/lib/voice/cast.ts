@@ -16,7 +16,12 @@ export const KOKORO_VOICE: Record<VoiceRole, string> = {
 export const KOKORO_MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX'
 /** q8 loads onnx/model_quantized.onnx: 92,361,116 bytes on the Hugging Face repo (checked 2026-11-08). */
 export const KOKORO_DTYPE = 'q8'
-export const HD_DOWNLOAD_MB = 92
+export const KOKORO_MODEL_BYTES = 92_361_116
+/**
+ * What the listener actually downloads the first time, measured in Chromium on 2026-11-08: the q8 weights (92.4 MB),
+ * the ONNX runtime from jsDelivr (4.1 MB compressed) and about 0.5 MB per voice for six voices (3.1 MB).
+ */
+export const HD_DOWNLOAD_MB = 100
 
 /** Instant casting wants these genders, so the debate keeps the same shape as the HD cast. */
 export const ROLE_GENDER: Record<VoiceRole, 'm' | 'f'> = {
