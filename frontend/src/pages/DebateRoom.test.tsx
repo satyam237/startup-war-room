@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import DebateRoom from './DebateRoom'
+import { stubMatchMedia } from '../test-utils'
 
 class MockEventSource {
   static instances: MockEventSource[] = []
@@ -22,6 +23,8 @@ let seq = 0
 function emit(name: string, data: unknown) {
   act(() => { MockEventSource.instances.at(-1)!.emit(name, data, ++seq) })
 }
+/** Lets the stream go quiet long enough to count as caught up, as a live debate does between events. */
+const settle = () => act(() => new Promise<void>((r) => setTimeout(r, 450)))
 const start = (turn_id: string, agent: string, round = 1) => emit('turn_start', { turn_id, agent, round, attempt: 1 })
 const end = (turn_id: string, agent: string, text: string, round = 1) => emit('turn_end', { turn_id, agent, round, text })
 
@@ -229,5 +232,95 @@ describe('DebateRoom', () => {
     expect(card).toHaveTextContent('3')
     expect(card).toHaveTextContent('Incumbents copy it in a quarter')
     expect(card).toHaveTextContent('A signed anchor customer')
+  })
+
+  it('lists real setup steps and says how long the wait has been, before the first turn', async () => {
+    setup()
+    await connected()
+    expect(screen.getByTestId('setup-stage')).toHaveTextContent(/connecting/i)
+    emit('setup', { step: 'persona', message: 'Building your customer persona...' })
+    emit('setup', { step: 'competitors', message: 'Scouting competitors...' })
+    const stage = screen.getByTestId('setup-stage')
+    expect(stage).toHaveTextContent('Building your customer persona...')
+    expect(stage).toHaveTextContent('Scouting competitors...')
+    expect(stage.querySelector('[data-step-state="active"]')).toHaveTextContent('Scouting competitors...')
+    expect(stage.querySelector('[data-step-state="done"]')).toHaveTextContent('Building your customer persona...')
+    start('t1', 'vc')
+    expect(screen.queryByTestId('setup-stage')).not.toBeInTheDocument()
+  })
+
+  it('slams a round title when a new round begins, and shows no score before round 3', async () => {
+    setup()
+    await connected()
+    await settle()
+    start('t1', 'vc', 1)
+    expect(screen.getByTestId('round-title')).toHaveTextContent(/round\s*1/i)
+    end('t1', 'vc', 'One.', 1)
+    start('t2', 'cto', 2)
+    expect(screen.getByTestId('round-title')).toHaveTextContent(/round\s*2/i)
+    expect(screen.getByTestId('agent-vc')).not.toHaveTextContent(/out of 10/)
+  })
+
+  it('rings the bell at a checkpoint and fills the round meter from real turns', async () => {
+    setup()
+    await connected()
+    start('t1', 'vc'); end('t1', 'vc', 'One.')
+    start('t2', 'cto'); end('t2', 'cto', 'Two.')
+    const meter = screen.getByRole('progressbar', { name: /debate progress/i })
+    expect(meter.querySelectorAll('[data-filled="true"]').length).toBe(2)
+    expect(screen.queryAllByTestId('bell')).toHaveLength(0)
+    emit('checkpoint', { round: 1, summary: 'Pricing is the crux.', top_disagreements: ['Price too high', 'Price too low'] })
+    expect(screen.getAllByTestId('bell').length).toBeGreaterThan(0)
+    expect(screen.getByText('Round 1 of 3')).toBeInTheDocument()
+  })
+
+  it('builds pressure in the last seconds of the rebuttal window', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    setup()
+    await connected()
+    emit('await_rebuttal', { timeout_s: 30 })
+    const box = screen.getByRole('timer').closest('form')!
+    expect(box).toHaveAttribute('data-pressure', 'calm')
+    act(() => { vi.advanceTimersByTime(21000) })
+    expect(box).toHaveAttribute('data-pressure', 'rising')
+    act(() => { vi.advanceTimersByTime(7000) })
+    expect(box).toHaveAttribute('data-pressure', 'critical')
+  })
+
+  it('holds the round title until the checkpoint bell has finished, so the two never overlap', async () => {
+    stubMatchMedia(false)
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    setup()
+    await connected()
+    act(() => { vi.advanceTimersByTime(500) })
+    start('t1', 'vc', 1)
+    act(() => { vi.advanceTimersByTime(5000) })
+    end('t1', 'vc', 'One.', 1)
+    emit('checkpoint', { round: 1, summary: 'Pricing is the crux.', top_disagreements: ['a', 'b'] })
+    start('t2', 'cto', 2)
+    expect(screen.getByTestId('bell-flash')).toBeInTheDocument()
+    expect(screen.queryByTestId('round-title')).not.toBeInTheDocument()
+    act(() => { vi.advanceTimersByTime(1600) })
+    expect(screen.getByTestId('round-title')).toHaveTextContent(/round\s*2/i)
+  })
+
+  it('replays a reloaded debate quietly, then animates what happens live', async () => {
+    stubMatchMedia(false)
+    setup()
+    await connected()
+    // The replay after a reload: every earlier event in one burst.
+    start('t1', 'vc', 1); end('t1', 'vc', 'One.', 1)
+    emit('checkpoint', { round: 1, summary: 'Pricing is the crux.', top_disagreements: ['a', 'b'] })
+    start('t2', 'cto', 2); end('t2', 'cto', 'Two.', 2)
+    expect(screen.queryByTestId('versus')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('round-title')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('bell-flash')).not.toBeInTheDocument()
+    const log = screen.getByRole('log')
+    expect([...log.querySelectorAll('article')].map((a) => a.dataset.fresh)).toEqual(['false', 'false'])
+
+    await settle()
+    start('t3', 'competitor', 3)
+    expect(screen.getByTestId('round-title')).toHaveTextContent(/round\s*3/i)
+    expect(log.querySelectorAll('article')[2]).toHaveAttribute('data-fresh', 'true')
   })
 })

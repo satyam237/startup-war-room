@@ -122,6 +122,7 @@ export function debateReducer(state: DebateState, action: DebateAction): DebateS
         ...state,
         status: 'running',
         awaitingRebuttal: null,
+        error: state.error?.recoverable ? null : state.error, // the room has moved on
         turns: { ...state.turns, [turn_id]: { id: turn_id, agent, round, attempt, text: '', status: 'streaming' } },
         order: prev ? state.order : [...state.order, turn_id],
         feed: prev ? state.feed : [...state.feed, { kind: 'turn', id: turn_id }],

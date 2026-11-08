@@ -1,27 +1,26 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { m } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, createDebate, saveDeleteToken, type CreateDebateBody } from '../lib/api'
-import { AGENTS } from '../lib/debateReducer'
+import { loadDebateRoom } from '../lib/routes'
+import Bell from '../components/Bell'
+import KineticText from '../components/motion/KineticText'
+import Ropes from '../components/motion/Ropes'
+import Roster from '../components/Roster'
+import ThemeSwitcher from '../components/ThemeSwitcher'
+import { useCalm } from '../components/motion/useCalm'
 
 const MIN = 50
 const MAX = 2000
 const MAX_META_CHARS = 200 // backend/app/routes.py
 
-const SEATS: Record<(typeof AGENTS)[number], string> = {
-  vc: 'Investor',
-  customer: 'Customer',
-  cto: 'Engineer',
-  competitor: 'Rival',
-  moderator: 'Moderator',
-}
-
 const EXAMPLES = [
   {
-    label: 'Electrician marketplace',
+    label: 'Electrician app',
     pitch: 'An app that matches freelance electricians with last-minute jobs near them, with instant payouts after each job and a 12 percent fee charged to the homeowner.',
   },
   {
-    label: 'AI meeting notes for clinics',
+    label: 'AI clinic notes',
     pitch: 'Ambient AI that listens to doctor-patient visits in small clinics, writes the visit note, and files it into the clinic software. Priced at 60 dollars per doctor per month.',
   },
   {
@@ -40,6 +39,7 @@ function withAnswers(pitch: string, questions: string[], answers: string[]): str
 }
 
 export default function Pitch() {
+  const calm = useCalm()
   const navigate = useNavigate()
   const location = useLocation()
   const [pitch, setPitch] = useState<string>((location.state as { pitch?: string } | null)?.pitch ?? '')
@@ -50,6 +50,13 @@ export default function Pitch() {
   const [answers, setAnswers] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [armed, setArmed] = useState(false) // pointer or focus is on a button that can start the debate
+
+  // The sunburst turns only behind this hero; every other page gets it still.
+  useEffect(() => {
+    document.documentElement.dataset.rays = 'turning'
+    return () => { delete document.documentElement.dataset.rays }
+  }, [])
 
   const len = pitch.length
   const outgoing = questions ? withAnswers(pitch, questions, answers) : pitch
@@ -59,6 +66,7 @@ export default function Pitch() {
 
   async function send(body: CreateDebateBody) {
     setBusy(true)
+    void loadDebateRoom() // ready by the time the server answers, so the hand-off shows no loading screen
     setError(null)
     try {
       const res = await createDebate(body)
@@ -94,124 +102,168 @@ export default function Pitch() {
     }
   }
 
-  const field = 'w-full rounded-sm border border-line bg-bunker px-3 py-2 text-ink placeholder:text-muted/70'
+  const field = 'field'
+
+  const mood = busy ? 'locked' : armed && valid ? 'ready' : 'idle'
+  const label = busy ? 'Entering the ring' : questions ? 'Continue to debate' : 'Start the debate'
 
   return (
-    <main className="mx-auto max-w-3xl px-5 py-10 sm:py-16">
-      <ul className="mb-8 flex items-end gap-2" aria-label="Who is in the room">
-        {AGENTS.map((a, i) => (
-          <li key={a} data-agent={a} className="flex flex-col gap-1.5" style={{ flex: a === 'moderator' ? 0.7 : 1 }}>
-            <span className="seat block h-8 rounded-t-sm bg-(--agent)" style={{ animationDelay: `${i * 110}ms` }} />
-            <span className="text-xs text-muted">{SEATS[a]}</span>
-          </li>
-        ))}
-      </ul>
+    <main className="mx-auto max-w-7xl px-5 pb-16 pt-4">
+      <header className="flex items-center justify-between gap-4">
+        <p className="display whitespace-nowrap text-[1.2rem] sm:text-3xl">Startup War Room</p>
+        <ThemeSwitcher />
+      </header>
 
-      <h1 className="font-display text-5xl font-black leading-[0.95] tracking-tight [font-stretch:75%] sm:text-7xl">
-        Four skeptics will take your idea apart.
-      </h1>
-      <p className="mt-5 max-w-xl font-body text-lg leading-relaxed text-muted">
-        Pitch it in a few sentences. An investor, a customer, an engineer and a rival argue it out
-        live, and a moderator hands down a verdict.
-      </p>
+      <div className="mt-5 grid gap-8 lg:mt-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
+        <section aria-label="The arena" className="min-w-0">
+          {/* On wide screens the size follows the column, so the line "will take your" always fits and the
+              headline sets in three lines; 13vh keeps the fighters on screen at laptop heights. */}
+          <h1
+            aria-label="Four skeptics will take your idea apart."
+            className="text-[clamp(3.4rem,15.5vw,6.9rem)] lg:text-[min(calc((min(100vw,80rem)_-_5rem)*0.08),13vh)]"
+          >
+            <KineticText text="Four skeptics will take your idea apart." className="display misprint block" />
+          </h1>
+          <p className="mt-5 max-w-xl font-body text-lg leading-relaxed">
+            Pitch it in a few sentences. An investor, a customer, an engineer and a rival argue it out
+            live, and a moderator hands down a verdict.
+          </p>
+          <Ropes className="mt-4" />
+          <Roster mood={mood} />
+        </section>
 
-      <form onSubmit={onSubmit} className="mt-10 space-y-5">
-        <div>
-          <label htmlFor="pitch" className="mb-2 block font-semibold">Your pitch</label>
-          <textarea
-            id="pitch"
-            value={pitch}
-            onChange={(e) => setPitch(e.target.value)}
-            rows={7}
-            disabled={busy}
-            placeholder="What are you building, for whom, and how will it make money?"
-            className={`${field} font-body leading-relaxed`}
-          />
-          <div className="mt-2 flex items-center gap-3 text-sm text-muted">
-            <div className="h-1 flex-1 overflow-hidden rounded-full bg-line" aria-hidden="true">
-              <div
-                className={`h-full transition-[width] ${len > MAX ? 'bg-competitor' : valid ? 'bg-customer' : 'bg-vc'}`}
-                style={{ width: `${fill}%` }}
-              />
-            </div>
-            <span aria-live="polite">
-              {len < MIN ? `${MIN - len} more characters needed` : len > MAX ? `${len - MAX} over the limit` : `${len} of ${MAX}`}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-muted">No idea handy? Try one.</span>
-          {EXAMPLES.map((ex) => (
-            <button
-              key={ex.label}
-              type="button"
-              aria-label={`Example: ${ex.label}`}
-              onClick={() => setPitch(ex.pitch)}
-              className="rounded-full border border-line px-3 py-1 text-sm hover:border-ink"
-            >
-              {ex.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted">Target user (optional)</span>
-            <input className={field} maxLength={MAX_META_CHARS} value={targetUser} onChange={(e) => setTargetUser(e.target.value)} />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted">Pricing idea (optional)</span>
-            <input className={field} maxLength={MAX_META_CHARS} value={pricing} onChange={(e) => setPricing(e.target.value)} />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted">Stage (optional)</span>
-            <input className={field} maxLength={MAX_META_CHARS} value={stage} onChange={(e) => setStage(e.target.value)} />
-          </label>
-        </div>
-
-        {questions && questions.length > 0 && (
-          <fieldset className="space-y-4 rounded-sm border border-moderator/60 bg-panel p-4" data-agent="moderator">
-            <legend className="px-2 font-semibold text-(--agent)">The moderator needs two more answers</legend>
-            {questions.map((q, i) => (
-              <div key={i}>
-                <label htmlFor={`q${i}`} className="mb-1 block">{q}</label>
-                <input
-                  id={`q${i}`}
-                  className={field}
-                  value={answers[i] ?? ''}
-                  onChange={(e) => setAnswers(answers.map((a, j) => (j === i ? e.target.value : a)))}
+        <form onSubmit={onSubmit} className="surface relative z-10 space-y-4 p-5 lg:sticky lg:top-4" style={{ boxShadow: '8px 8px 0 var(--color-punch)' }}>
+          <div>
+            <label htmlFor="pitch" className="display mb-2 block text-3xl">Your pitch</label>
+            <textarea
+              id="pitch"
+              value={pitch}
+              onChange={(e) => setPitch(e.target.value)}
+              rows={5}
+              disabled={busy}
+              placeholder="What are you building, for whom, and how will it make money?"
+              className={`${field} font-body leading-relaxed`}
+            />
+            <div className="mt-3 flex items-center gap-3 text-sm text-muted">
+              <div className="h-3 flex-1 overflow-hidden rounded-full border-[3px] border-line bg-panel-hi" aria-hidden="true">
+                <div
+                  className={`h-full origin-left transition-transform duration-200 ${len > MAX ? 'bg-competitor' : valid ? 'bg-customer' : 'bg-vc'}`}
+                  style={{ transform: `scaleX(${fill / 100})` }}
                 />
               </div>
+              <span aria-live="polite" className="shrink-0 font-semibold">
+                {len < MIN ? `${MIN - len} more characters needed` : len > MAX ? `${len - MAX} over the limit` : `${len} of ${MAX}`}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-muted">Or try</span>
+            {EXAMPLES.map((ex) => (
+              <button
+                key={ex.label}
+                type="button"
+                aria-label={`Example: ${ex.label}`}
+                onClick={() => setPitch(ex.pitch)}
+                className="rounded border-[3px] border-line bg-panel-hi px-2.5 py-1 text-sm font-bold transition-transform hover:-translate-y-0.5 hover:rotate-[-1.5deg] hover:bg-vc active:translate-y-0 hover:text-fill-ink"
+              >
+                {ex.label}
+              </button>
             ))}
-          </fieldset>
-        )}
+          </div>
 
-        {questions && overBy > 0 && (
-          <p role="status" className="rounded-sm border border-vc/70 bg-vc/10 px-3 py-2 text-vc">
-            Your pitch plus your answers is {overBy} characters over the {MAX} limit. Shorten the pitch or an answer to continue.
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="block text-sm">
+              <span className="mb-1 block font-semibold text-muted">Target user (optional)</span>
+              <input className={field} maxLength={MAX_META_CHARS} value={targetUser} onChange={(e) => setTargetUser(e.target.value)} />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-semibold text-muted">Pricing idea (optional)</span>
+              <input className={field} maxLength={MAX_META_CHARS} value={pricing} onChange={(e) => setPricing(e.target.value)} />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-semibold text-muted">Stage (optional)</span>
+              <input className={field} maxLength={MAX_META_CHARS} value={stage} onChange={(e) => setStage(e.target.value)} />
+            </label>
+          </div>
+
+          {questions && questions.length > 0 && (
+            <m.fieldset
+              data-agent="moderator"
+              className="surface space-y-4 !bg-panel-hi p-4"
+              initial={calm ? false : { opacity: 0, y: 16, rotate: -1 }}
+              animate={{ opacity: 1, y: 0, rotate: 0 }}
+            >
+              <legend className="display rounded-md border-[3px] border-line bg-(--agent) px-3 py-1 text-xl text-fill-ink">
+                The moderator needs two more answers
+              </legend>
+              {questions.map((q, i) => (
+                <div key={i}>
+                  <label htmlFor={`q${i}`} className="mb-1 block font-semibold">{q}</label>
+                  <input
+                    id={`q${i}`}
+                    className={field}
+                    value={answers[i] ?? ''}
+                    onChange={(e) => setAnswers(answers.map((a, j) => (j === i ? e.target.value : a)))}
+                  />
+                </div>
+              ))}
+            </m.fieldset>
+          )}
+
+          {questions && overBy > 0 && (
+            <p role="status" className="rounded-md border-[3px] border-line bg-vc px-3 py-2 font-semibold text-fill-ink">
+              Your pitch plus your answers is {overBy} characters over the {MAX} limit. Shorten the pitch or an answer to continue.
+            </p>
+          )}
+
+          {error && (
+            <m.p
+              role="alert"
+              className="rounded-md border-[3px] border-line bg-competitor px-3 py-2 font-semibold text-fill-ink"
+              initial={calm ? false : { x: -10 }}
+              animate={{ x: [-10, 8, -6, 4, 0] }}
+              transition={{ duration: 0.4 }}
+            >
+              {error}
+            </m.p>
+          )}
+
+          <button
+            type="submit"
+            disabled={!valid || busy}
+            aria-busy={busy}
+            onPointerEnter={() => setArmed(true)}
+            onPointerLeave={() => setArmed(false)}
+            onFocus={() => setArmed(true)}
+            onBlur={() => setArmed(false)}
+            className={`slab group relative w-full overflow-hidden bg-accent px-6 py-3.5 text-xl text-on-accent ${valid && !calm ? 'armed-pop' : ''}`}
+          >
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/4 -skew-x-12 bg-white/35 transition-transform duration-700 ease-out group-hover:translate-x-[550%] group-disabled:hidden"
+            />
+            <span className="relative flex items-center justify-center gap-3">
+              {(busy || valid) && <Bell ringing={busy && !calm} className="size-6 transition-transform group-hover:rotate-12" />}
+              <span className={`transition-[letter-spacing] duration-300 ${busy ? '' : 'group-hover:tracking-[0.06em]'}`}>{label}</span>
+            </span>
+          </button>
+
+          {busy && (
+            <div role="status" aria-label="Sending your pitch" className="-mt-2 space-y-2">
+              <div className="relative h-2.5 overflow-hidden rounded-full border-[3px] border-line bg-panel-hi">
+                <div className="sweep absolute inset-y-0 left-0 w-1/3 bg-competitor" />
+              </div>
+              <p className="text-sm font-semibold text-muted">Checking your pitch, then opening the room.</p>
+            </div>
+          )}
+
+          <p className="text-xs leading-relaxed text-muted">
+            Do not paste confidential or proprietary information. Debates are reachable by anyone with the link.
+            The critique is AI brainstorming, not professional advice.
           </p>
-        )}
-
-        {error && (
-          <p role="alert" className="rounded-sm border border-competitor/70 bg-competitor/10 px-3 py-2 text-competitor">
-            {error}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={!valid || busy}
-          className="rounded-sm bg-ink px-6 py-3 font-bold text-bunker hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {busy ? 'Opening the room' : questions ? 'Continue to debate' : 'Start the debate'}
-        </button>
-
-        <p className="text-sm text-muted">
-          Do not paste confidential or proprietary information. Debates are reachable by anyone with the link.
-          The critique is AI brainstorming, not professional advice.
-        </p>
-      </form>
+        </form>
+      </div>
     </main>
   )
 }

@@ -1,8 +1,22 @@
-/* Print / "Save as PDF": hide controls and switch to a light page. */
+/* Print / "Save as PDF": hide controls and switch to a light page whatever the theme. */
 @media print {
+  :root, [data-theme] {
+    --color-canvas: #fff; --color-panel: #fff; --color-panel-hi: #fff;
+    --color-line: #999; --color-shade: transparent;
+    --color-ink: #111; --color-muted: #333; --color-on-canvas: #111; --color-on-canvas-muted: #333;
+  }
   html, body { background: #fff !important; color: #111 !important; }
-  [data-print="hide"] { display: none !important; }
+  [data-print="hide"], body::before { display: none !important; }
   main { max-width: none !important; padding: 0 !important; }
   section, li { break-inside: avoid; }
-  * { color: #111 !important; border-color: #999 !important; background: transparent !important; }
+  * { color: #111 !important; border-color: #999 !important; background: transparent !important; box-shadow: none !important; animation: none !important; }
+  /* Dark radar so the chart survives a white page. */
+  .radar-shape { stroke: #111 !important; fill: #111 !important; fill-opacity: 0.18 !important; }
+  .radar-grid line, .radar-grid path, .radar-grid polygon { stroke: #999 !important; }
+  /* Whatever the staged reveal has not reached yet still prints. */
+  [data-cascade] { opacity: 1 !important; transform: none !important; }
+  /* The slam wrapper starts at opacity 0 and three times the size; a page printed early must still show the ruling. */
+  .stamp-slam { opacity: 1 !important; transform: rotate(-4deg) !important; }
+  .stamp { transform: none !important; opacity: 1 !important; border-color: #111 !important; outline-color: #111 !important; }
+  .stamp::after, .stamp-mark { display: none !important; }
 }

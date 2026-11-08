@@ -8,7 +8,7 @@ export default function FeedbackBox({ debateId }: { debateId: string }) {
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  if (done) return <p role="status" className="text-muted print:hidden">Thanks for the feedback.</p>
+  if (done) return <p role="status" className="font-bold text-on-canvas print:hidden">Thanks for the feedback.</p>
 
   async function submit() {
     setBusy(true)
@@ -24,8 +24,8 @@ export default function FeedbackBox({ debateId }: { debateId: string }) {
   }
 
   return (
-    <section aria-labelledby="fb-h" className="print:hidden">
-      <h2 id="fb-h" className="font-display text-2xl font-bold">Was this useful?</h2>
+    <section aria-labelledby="fb-h" className="surface p-5 print:hidden">
+      <h2 id="fb-h" className="display text-3xl">Was this useful?</h2>
       <div role="radiogroup" aria-label="Rating" className="mt-3 flex gap-2">
         {[1, 2, 3, 4, 5].map((n) => (
           <button
@@ -35,28 +35,28 @@ export default function FeedbackBox({ debateId }: { debateId: string }) {
             aria-checked={rating === n}
             aria-label={`${n} of 5`}
             onClick={() => setRating(n)}
-            className={`size-10 rounded-sm border font-bold ${rating === n ? 'border-ink bg-ink text-bunker' : 'border-line hover:border-ink'}`}
+            className={`slab size-11 text-lg ${rating === n ? 'bg-accent text-on-accent' : 'bg-panel text-ink'}`}
           >
             {n}
           </button>
         ))}
       </div>
       <label className="mt-3 block text-sm">
-        <span className="mb-1 block text-muted">Comment (optional)</span>
+        <span className="mb-1 block font-semibold text-muted">Comment (optional)</span>
         <textarea
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           rows={2}
           maxLength={1000}
-          className="w-full max-w-lg rounded-sm border border-line bg-bunker px-3 py-2 text-ink"
+          className="field max-w-lg"
         />
       </label>
-      {error && <p role="alert" className="mt-2 text-competitor">{error}</p>}
+      {error && <p role="alert" className="mt-2 font-bold text-competitor-ink">{error}</p>}
       <button
         type="button"
         disabled={rating === 0 || busy}
         onClick={() => void submit()}
-        className="mt-3 rounded-sm bg-ink px-5 py-2 font-bold text-bunker disabled:cursor-not-allowed disabled:opacity-40"
+        className="slab mt-3 bg-accent px-5 py-2 text-on-accent"
       >
         Send feedback
       </button>

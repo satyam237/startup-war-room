@@ -1,67 +1,354 @@
 @import "tailwindcss";
 
 /*
- * Design tokens. Every colour and typeface used by the app is defined here.
- * Agent colours are exposed as --color-vc, --color-customer, etc. (utilities such as
- * bg-vc, text-cto, border-competitor), and as a --agent CSS variable via [data-agent].
+ * Design tokens. The look is a fight poster: flat saturated colour, thick ink outlines, hard offset shadows.
+ * Everything that changes between themes is a CSS variable, so a theme is one block below.
+ * The @theme block is the default theme, Ringside. Others override the same variables under [data-theme].
+ *
+ * Colour roles:
+ *   canvas / on-canvas   the page, and text written directly on it
+ *   canvas-2             the second ink of the poster's sunburst; on-canvas must read on it too
+ *   punch                the misregistered shadow behind big headline type
+ *   panel / ink / muted  surfaces (cards, forms) and the text on them
+ *   line / shade         outlines, and the hard offset shadow
+ *   accent / on-accent   the primary button
+ *   <agent>              a fill, always labelled in fill-ink
+ *   <agent>-ink          the same hue made readable as text on a panel
  */
 @theme {
-  --color-bunker: #11161b;
-  --color-panel: #1a222a;
-  --color-panel-hi: #222d37;
-  --color-line: #2f3b47;
-  --color-ink: #ece7dc;
-  --color-muted: #93a1ad;
+  --color-canvas: #ffd93d;
+  --color-canvas-2: #ffcd1c;
+  --color-punch: #ff3d6e;
+  --color-panel: #ffffff;
+  --color-panel-hi: #fff3b0;
+  --color-line: #15110d;
+  --color-shade: #15110d;
+  --color-ink: #15110d;
+  --color-muted: #51493e;
+  --color-on-canvas: #15110d;
+  --color-on-canvas-muted: #3d3524;
+  --color-accent: #15110d;
+  --color-on-accent: #ffd93d;
+  --color-fill-ink: #15110d;
 
-  --color-vc: #f2b544;
-  --color-customer: #4cc9a7;
-  --color-cto: #6c9dff;
-  --color-competitor: #ff5a4f;
-  --color-moderator: #c8a8ff;
+  --color-vc: #ff8a1f;
+  --color-customer: #22d39a;
+  --color-cto: #4c8dff;
+  --color-competitor: #ff3d6e;
+  --color-moderator: #b070ff;
+
+  --color-vc-ink: #9a4600;
+  --color-customer-ink: #077350;
+  --color-cto-ink: #1c4dd0;
+  --color-competitor-ink: #c0123c;
+  --color-moderator-ink: #6a2bd0;
+
+  /* Stamp ink: display-size type on a panel, so 3:1 and as bright as that allows. */
+  --color-stamp-go: #008f62;
+  --color-stamp-pivot: #e55300;
+  --color-stamp-no-go: #e01142;
 
   --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
   --font-body: "IBM Plex Serif", Georgia, serif;
   --font-ui: "Archivo", system-ui, sans-serif;
 }
 
+[data-theme="nightcard"] {
+  --color-canvas: #120d2b;
+  --color-canvas-2: #1a1340;
+  --color-punch: #ff4d6d;
+  --color-panel: #1d1740;
+  --color-panel-hi: #2b2363;
+  --color-line: #7b6cf0;
+  --color-shade: #05030f;
+  --color-ink: #fff7e8;
+  --color-muted: #c0b8ea;
+  --color-on-canvas: #fff7e8;
+  --color-on-canvas-muted: #c0b8ea;
+  --color-accent: #ffe14a;
+  --color-on-accent: #120d2b;
+  --color-fill-ink: #120d2b;
+
+  --color-vc: #ffc53d;
+  --color-customer: #2ef2b0;
+  --color-cto: #5c9dff;
+  --color-competitor: #ff4d6d;
+  --color-moderator: #c084fc;
+
+  --color-vc-ink: #ffc53d;
+  --color-customer-ink: #2ef2b0;
+  --color-cto-ink: #7fb2ff;
+  --color-competitor-ink: #ff7088;
+  --color-moderator-ink: #c99bff;
+
+  --color-stamp-go: #2ef2b0;
+  --color-stamp-pivot: #ffc53d;
+  --color-stamp-no-go: #ff7088;
+}
+
+[data-theme="courtside"] {
+  --color-canvas: #2457ff;
+  --color-canvas-2: #1c4cf0;
+  --color-punch: #0a1030;
+  --color-panel: #ffffff;
+  --color-panel-hi: #e3eaff;
+  --color-line: #0a1030;
+  --color-shade: #0a1030;
+  --color-ink: #0a1030;
+  --color-muted: #3e4670;
+  --color-on-canvas: #ffffff;
+  --color-on-canvas-muted: #e9eeff;
+  --color-accent: #ffe14a;
+  --color-on-accent: #0a1030;
+  --color-fill-ink: #0a1030;
+
+  --color-vc: #ff9f1c;
+  --color-customer: #19d68f;
+  --color-cto: #5ac8ff;
+  --color-competitor: #ff4d6d;
+  --color-moderator: #b070ff;
+
+  --color-vc-ink: #964e00;
+  --color-customer-ink: #077350;
+  --color-cto-ink: #0a5fb0;
+  --color-competitor-ink: #c0123c;
+  --color-moderator-ink: #6a2bd0;
+}
+
+[data-theme="bubblegum"] {
+  --color-canvas: #ff9ed8;
+  --color-canvas-2: #ff90d2;
+  --color-punch: #7b2cff;
+  --color-panel: #ffffff;
+  --color-panel-hi: #ffe3f3;
+  --color-line: #2a0a24;
+  --color-shade: #2a0a24;
+  --color-ink: #2a0a24;
+  --color-muted: #5c3a55;
+  --color-on-canvas: #2a0a24;
+  --color-on-canvas-muted: #4d2145;
+  --color-accent: #7b2cff;
+  --color-on-accent: #ffffff;
+  --color-fill-ink: #2a0a24;
+
+  --color-vc: #ffb020;
+  --color-customer: #20d6a0;
+  --color-cto: #3b8cff;
+  --color-competitor: #ff3d81;
+  --color-moderator: #9b6bff;
+
+  --color-vc-ink: #8f5600;
+  --color-customer-ink: #077350;
+  --color-cto-ink: #1c4dd0;
+  --color-competitor-ink: #bd0f55;
+  --color-moderator-ink: #6a2bd0;
+}
+
+[data-theme="nightcard"] { color-scheme: dark; }
+
 @layer base {
-  html { color-scheme: dark; }
+  html { color-scheme: light; background: var(--color-canvas); transition: background-color 0.35s; overflow-x: clip; }
   body {
     margin: 0;
-    background: var(--color-bunker);
-    color: var(--color-ink);
+    color: var(--color-on-canvas);
     font-family: var(--font-ui);
     -webkit-font-smoothing: antialiased;
+    overflow-wrap: break-word;
+    transition: color 0.35s;
+  }
+  /*
+   * The poster's sunburst: a still print on every page. Only the Pitch hero sets data-rays="turning" on <html>,
+   * and only then does it turn on its own composited layer. 170vmax is the smallest disc that still covers
+   * every corner of the window from its centre (50%, 34%) while it turns.
+   */
+  body::before {
+    content: "";
+    position: fixed;
+    left: 50%;
+    top: 34%;
+    z-index: -1;
+    width: 170vmax;
+    height: 170vmax;
+    margin: -85vmax 0 0 -85vmax;
+    pointer-events: none;
+    background: repeating-conic-gradient(var(--color-canvas-2) 0 7.5deg, transparent 0 15deg);
+  }
+  html[data-rays="turning"] body::before {
+    animation: rays-turn 240s linear infinite;
+    will-change: transform;
   }
   :focus-visible {
-    outline: 2px solid var(--color-ink);
+    outline: 3px solid var(--color-on-canvas);
     outline-offset: 3px;
+    box-shadow: 0 0 0 6px var(--color-canvas);
+  }
+  /* Inside a panel the focus ring needs the panel's own contrast. */
+  .surface :focus-visible, .surface:focus-visible {
+    outline-color: var(--color-ink);
+    box-shadow: 0 0 0 6px var(--color-panel);
   }
 }
 
-[data-agent="vc"] { --agent: var(--color-vc); }
-[data-agent="customer"] { --agent: var(--color-customer); }
-[data-agent="cto"] { --agent: var(--color-cto); }
-[data-agent="competitor"] { --agent: var(--color-competitor); }
-[data-agent="moderator"] { --agent: var(--color-moderator); }
+[data-agent="vc"] { --agent: var(--color-vc); --agent-ink: var(--color-vc-ink); }
+[data-agent="customer"] { --agent: var(--color-customer); --agent-ink: var(--color-customer-ink); }
+[data-agent="cto"] { --agent: var(--color-cto); --agent-ink: var(--color-cto-ink); }
+[data-agent="competitor"] { --agent: var(--color-competitor); --agent-ink: var(--color-competitor-ink); }
+[data-agent="moderator"] { --agent: var(--color-moderator); --agent-ink: var(--color-moderator-ink); }
 
-/* The one deliberate motion: the five seats light up in sequence once on load. */
-@keyframes seat-on {
-  from { opacity: 0.15; transform: scaleY(0.4); }
-  to { opacity: 1; transform: scaleY(1); }
-}
-.seat { transform-origin: bottom; animation: seat-on 0.5s ease-out backwards; }
-@media (prefers-reduced-motion: reduce) {
-  .seat { animation: none; }
+/* ---- Shared poster pieces ---- */
+
+/** A card: panel colour, ink outline, hard offset shadow. */
+.surface {
+  background: var(--color-panel);
+  color: var(--color-ink);
+  border: 3px solid var(--color-line);
+  border-radius: 4px;
+  box-shadow: 5px 5px 0 var(--color-shade);
 }
 
-/* Streaming cursor and the speaking indicator; both are state feedback, so they stop under reduced motion. */
+/** Condensed black capitals: the poster voice. Only for headlines and fighter names, never for small labels. */
+.display {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-stretch: 62%;
+  text-transform: uppercase;
+  letter-spacing: 0.005em;
+  word-spacing: 0.14em;
+  line-height: 0.9;
+}
+
+/** Headline ink printed slightly off register, the way cheap poster runs come out. */
+.misprint { text-shadow: 0.04em 0.04em 0 var(--color-punch); }
+
+/** The referee's shirt. */
+.ref-stripes {
+  background: repeating-linear-gradient(90deg, var(--agent) 0 16px, var(--color-fill-ink) 16px 32px);
+}
+
+/** A button that presses into its own shadow. */
+.slab {
+  position: relative;
+  border: 3px solid var(--color-line);
+  border-radius: 4px;
+  box-shadow: 4px 4px 0 var(--color-shade);
+  transition: transform 0.12s, box-shadow 0.12s, background-color 0.2s;
+  cursor: pointer;
+  font-weight: 800;
+}
+.slab:hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 6px 6px 0 var(--color-shade); }
+.slab:active:not(:disabled) { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--color-shade); }
+.slab:disabled {
+  cursor: not-allowed;
+  background: var(--color-panel-hi);
+  color: var(--color-muted);
+  border-style: dashed;
+  border-color: var(--color-muted);
+  box-shadow: none;
+}
+.slab[aria-busy="true"]:disabled {
+  cursor: progress;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-style: solid;
+  border-color: var(--color-line);
+}
+/* The moment the pitch is long enough, the button wakes up once. */
+@keyframes armed-pop { 0% { transform: scale(1); } 40% { transform: scale(1.035) rotate(-0.5deg); } 100% { transform: scale(1); } }
+.armed-pop { animation: armed-pop 0.4s cubic-bezier(.2,1.7,.4,1); }
+
+.field {
+  width: 100%;
+  background: var(--color-panel);
+  color: var(--color-ink);
+  border: 3px solid var(--color-line);
+  border-radius: 4px;
+  padding: 0.55rem 0.75rem;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.field::placeholder { color: var(--color-muted); opacity: 0.85; }
+.field:focus { outline: 3px solid transparent; outline-offset: 2px; box-shadow: 4px 4px 0 var(--agent-ink, var(--color-shade)); transform: translate(-2px, -2px); }
+
+/* Forced colours drop box-shadows, so focus falls back to a real outline. The transparent outline above turns visible there. */
+@media (forced-colors: active) {
+  .field:focus { outline-color: Highlight; }
+  .slab:disabled { border-color: GrayText; color: GrayText; }
+}
+
+/* ---- Motion that CSS does best ---- */
+
+@keyframes rays-turn { to { transform: rotate(360deg); } }
+
+/* Fighters shifting their weight while the room is set up. */
+@keyframes warmup { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-3px) rotate(3deg); } }
+.warmup { display: block; animation: warmup 1.3s ease-in-out infinite; }
+[data-agent="customer"] .warmup { animation-delay: -0.3s; }
+[data-agent="cto"] .warmup { animation-delay: -0.6s; }
+[data-agent="competitor"] .warmup { animation-delay: -0.9s; }
+
+/* The speaking equaliser: four bars of the speaker's colour. */
+@keyframes eq { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
+.eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.eq > i { display: block; width: 3px; height: 100%; background: currentColor; transform-origin: bottom; animation: eq 0.9s ease-in-out infinite; }
+.eq > i:nth-child(2) { animation-delay: -0.3s; animation-duration: 0.7s; }
+.eq > i:nth-child(3) { animation-delay: -0.6s; animation-duration: 1.1s; }
+.eq > i:nth-child(4) { animation-delay: -0.15s; animation-duration: 0.8s; }
+
+/* A ring that expands off the active fighter. */
+@keyframes pulse-ring { from { transform: scale(1); opacity: 0.55; } to { transform: scale(1.05); opacity: 0; } }
+.pulse-ring { animation: pulse-ring 1.4s ease-out infinite; }
+
+/* The bell: a quick decaying swing from its pivot. */
+@keyframes bell-swing {
+  0% { transform: rotate(0); } 12% { transform: rotate(24deg); } 28% { transform: rotate(-20deg); }
+  44% { transform: rotate(14deg); } 60% { transform: rotate(-9deg); } 78% { transform: rotate(4deg); } 100% { transform: rotate(0); }
+}
+.bell-ring { transform-origin: 50% 12%; animation: bell-swing 1.4s ease-out 2; }
+
+/* Rebuttal pressure: the beat quickens as time runs out. */
+@keyframes heartbeat { 0%, 100% { transform: scale(1); } 12% { transform: scale(1.018); } 24% { transform: scale(1); } 36% { transform: scale(1.012); } }
+[data-pressure="rising"] .beat { animation: heartbeat 1.2s ease-in-out infinite; }
+[data-pressure="critical"] .beat { animation: heartbeat 0.55s ease-in-out infinite; }
+@keyframes tick-pop { from { transform: scale(1.35); } to { transform: scale(1); } }
+.tick-pop { animation: tick-pop 0.35s ease-out; }
+
+/* Waiting for the room: a bar that sweeps, since the real duration is not known. */
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+.sweep { animation: sweep 1.6s ease-in-out infinite; }
+
+/* The rubber stamp: flat ink with a double border. Specks of the paper show through it. */
+.stamp {
+  position: relative;
+  display: inline-block;
+  padding: 0.04em 0.22em 0;
+  border: 0.075em solid currentColor;
+  border-radius: 0.06em;
+  outline: 0.018em solid currentColor;
+  outline-offset: -0.13em;
+}
+.stamp::after {
+  content: "";
+  position: absolute;
+  inset: -0.1em;
+  pointer-events: none;
+  background: var(--color-panel);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.42' numOctaves='3' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -11 4.0'/%3E%3C/filter%3E%3Crect width='320' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+  mask-size: 320px 180px;
+}
+/* Where the stamp will land, before it does. */
+.stamp-mark { border: 4px dashed var(--color-muted); border-radius: 6px; opacity: 0.55; }
+
+/* Streaming cursor. */
 @keyframes blink { 50% { opacity: 0; } }
 .caret {
   display: inline-block; width: 0.5ch; height: 1em; margin-left: 2px;
-  vertical-align: text-bottom; background: var(--agent); animation: blink 1s steps(1) infinite;
+  vertical-align: text-bottom; background: var(--agent-ink, var(--color-ink)); animation: blink 1s steps(1) infinite;
 }
-.speaking-dot { animation: blink 1.2s ease-in-out infinite; }
+
+/* Reduced motion: nothing loops or travels. State changes (colour, opacity) stay. */
 @media (prefers-reduced-motion: reduce) {
-  .caret, .speaking-dot { animation: none; }
+  body::before, .warmup, .eq > i, .pulse-ring, .bell-ring, .tick-pop, .sweep, .caret, .armed-pop,
+  [data-pressure] .beat { animation: none !important; }
+  .eq > i { transform: scaleY(0.7); }
+  .slab, .field, html, body { transition: none; }
+  .slab:hover:not(:disabled), .slab:active:not(:disabled) { transform: none; }
 }

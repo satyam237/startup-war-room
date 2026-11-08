@@ -153,4 +153,36 @@ describe('Pitch', () => {
     await userEvent.click(submit())
     expect(await screen.findByRole('alert')).toHaveTextContent('Pitch looks off')
   })
+
+  it('gives feedback the moment the pitch is sent, before the server answers', async () => {
+    fetchMock.mockReturnValueOnce(new Promise(() => {})) // never settles: the wait is what we are looking at
+    setup()
+    await enterPitch()
+    await userEvent.click(submit())
+    const btn = screen.getByRole('button', { name: /entering the ring/i })
+    expect(btn).toBeDisabled()
+    expect(btn).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('status', { name: /sending/i })).toBeInTheDocument()
+  })
+
+  it('names the five fighters', () => {
+    setup()
+    const roster = screen.getByRole('list', { name: /who is in the room/i })
+    for (const name of ['Investor', 'Customer', 'Engineer', 'Rival', 'Moderator']) expect(roster).toHaveTextContent(name)
+  })
+
+  it('keeps the headline readable as one sentence for assistive tech', () => {
+    setup()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveAccessibleName(/four skeptics will take your idea apart/i)
+  })
+
+  it('turns the sunburst only while the pitch page is open', async () => {
+    fetchMock.mockReturnValue(json(200, { status: 'created', debate_id: 'abc', delete_token: 't' }))
+    setup()
+    expect(document.documentElement.dataset.rays).toBe('turning')
+    await userEvent.type(box(), 'x'.repeat(60))
+    await userEvent.click(submit())
+    await screen.findByText('debate room')
+    expect(document.documentElement.dataset.rays).toBeUndefined()
+  })
 })
