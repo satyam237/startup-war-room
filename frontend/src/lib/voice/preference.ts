@@ -6,6 +6,11 @@ export type VoicePref = 'off' | 'instant' | 'hd'
 
 export const VOICE_KEY = 'swr.voice'
 export const HD_CONSENT_KEY = 'swr.voice.hdConsent'
+export const SPEED_KEY = 'swr.voice.speed'
+
+/** Speaking speeds offered everywhere (live and replay), as multiples of normal. */
+export const SPEEDS = [1, 1.25, 1.5, 2] as const
+export type Speed = (typeof SPEEDS)[number]
 
 const PREFS: readonly VoicePref[] = ['off', 'instant', 'hd']
 
@@ -32,4 +37,14 @@ export function hasHdConsent(): boolean {
 
 export function rememberHdConsent(): void {
   write(HD_CONSENT_KEY, '1')
+}
+
+/** One speed for live and replay, remembered next to the voice choice. */
+export function getSpeedPref(): Speed {
+  const v = Number(read(SPEED_KEY))
+  return (SPEEDS as readonly number[]).includes(v) ? (v as Speed) : 1
+}
+
+export function setSpeedPref(speed: Speed): void {
+  write(SPEED_KEY, String(speed))
 }

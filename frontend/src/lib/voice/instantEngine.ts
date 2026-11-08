@@ -136,7 +136,9 @@ export function createInstantEngine(synth: SpeechSynthesis | undefined = globalT
         pause() { if (stopped || paused) return; paused = true; silence() },
         // Browsers resume speech unreliably, so resume says the chunk again from its start. Chunks are short.
         resume() { if (stopped || !paused) return; paused = false; say() },
-        setRate(r: number) { speed = r; if (!stopped && !paused) { silence(); say() } },
+        // Speech rate cannot change mid-utterance, and restarting would repeat words: the new speed starts with
+        // the next chunk (or this one, if it is said again after a pause).
+        setRate(r: number) { speed = r },
       }
       active = handle
       say()

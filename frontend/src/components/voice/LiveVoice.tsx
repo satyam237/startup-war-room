@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { DebateState } from '../../lib/debateReducer'
 import { liveScript } from '../../lib/voice/script'
 import { hasHdConsent, rememberHdConsent, type VoicePref } from '../../lib/voice/preference'
-import { HdConsent, HdLoading, OnAir, Segmented } from './VoiceControls'
+import { HdConsent, HdLoading, OnAir, Segmented, SpeedPicker } from './VoiceControls'
 import { useBroadcast } from './useBroadcast'
 
 /**
@@ -53,6 +53,12 @@ export default function LiveVoice({ state }: { state: DebateState }) {
             { value: 'hd', label: 'HD (beta)', title: 'Natural voices that run on this device. One-time download.' },
           ]}
         />
+        {b.pref !== 'off' && (
+          <span className="flex items-center gap-2">
+            <span className="text-sm font-extrabold" aria-hidden="true">Speed</span>
+            <SpeedPicker rate={b.snap.rate} onPick={b.setRate} />
+          </span>
+        )}
         {b.pref !== 'off' && (
           <button type="button" onClick={toggle} aria-pressed={listening} className="slab bg-panel px-3 py-1 text-sm text-ink">
             {listening ? 'Pause voice' : 'Listen live'}

@@ -1,5 +1,6 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { HD_DOWNLOAD_MB } from '../../lib/voice/cast'
+import { SPEEDS, type Speed } from '../../lib/voice/preference'
 import type { HdStatus } from '../../lib/voice/hdEngine'
 import type { VoiceRole } from '../../lib/voice/types'
 import FighterGlyph from '../FighterGlyph'
@@ -136,4 +137,18 @@ export function CaptionText({ chunks, current }: { chunks: string[]; current: nu
   return chunks.map((c, i) => (
     <span key={i} className={i === current ? 'font-semibold text-ink' : 'text-muted'}>{i ? ' ' : ''}{c}</span>
   ))
+}
+
+type SpeedValue = `${Speed}`
+
+/** Speaking speed, shared by live and replay. Arrow keys move focus; Enter or Space picks. */
+export function SpeedPicker({ rate, onPick }: { rate: number; onPick: (s: Speed) => void }) {
+  return (
+    <Segmented<SpeedValue>
+      label="Speed"
+      value={String(rate) as SpeedValue}
+      onPick={(v) => onPick(Number(v) as Speed)}
+      options={SPEEDS.map((s) => ({ value: String(s) as SpeedValue, label: `${s}x` }))}
+    />
+  )
 }

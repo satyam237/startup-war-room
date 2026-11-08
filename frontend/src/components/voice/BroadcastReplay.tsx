@@ -3,11 +3,9 @@ import type { DebateRecord } from '../../lib/api'
 import { replayScript } from '../../lib/voice/script'
 import { hasHdConsent, rememberHdConsent } from '../../lib/voice/preference'
 import { useCalm } from '../motion/useCalm'
-import { CaptionText, HdConsent, HdLoading, OnAir, Segmented } from './VoiceControls'
+import { CaptionText, HdConsent, HdLoading, OnAir, Segmented, SpeedPicker } from './VoiceControls'
 import { useBroadcast } from './useBroadcast'
 
-const SPEEDS = [1, 1.25, 1.5] as const
-type Speed = `${(typeof SPEEDS)[number]}`
 
 const icon = 'size-4 shrink-0'
 const PlayIcon = () => <svg viewBox="0 0 16 16" className={icon} aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor" /></svg>
@@ -88,12 +86,7 @@ export default function BroadcastReplay({ debate }: { debate: DebateRecord }) {
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <span className="w-12 text-sm font-extrabold" aria-hidden="true">Speed</span>
-            <Segmented<Speed>
-              label="Speed"
-              value={String(rate) as Speed}
-              onPick={(v) => b.setRate(Number(v))}
-              options={SPEEDS.map((s) => ({ value: String(s) as Speed, label: `${s}x` }))}
-            />
+            <SpeedPicker rate={rate} onPick={b.setRate} />
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <span className="w-12 text-sm font-extrabold" aria-hidden="true">Voice</span>

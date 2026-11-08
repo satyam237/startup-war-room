@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { DebateRecord } from '../../lib/api'
-import { VOICE_KEY } from '../../lib/voice/preference'
+import { SPEED_KEY, VOICE_KEY } from '../../lib/voice/preference'
 import BroadcastReplay from './BroadcastReplay'
 import { installFakeSpeech } from './voiceTestKit'
 
@@ -86,13 +86,27 @@ describe('BroadcastReplay', () => {
     expect(synth.current?.text).toBe('We have 40 signed.')
   })
 
-  it('changes speed and applies it to the line in progress', async () => {
+  it('offers 1x to 2x; a change keeps the current chunk going and speeds up the next one, and is remembered', async () => {
     render(<BroadcastReplay debate={debate} />)
+    const group = screen.getByRole('radiogroup', { name: 'Speed' })
+    expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual(['1x', '1.25x', '1.5x', '2x'])
     await userEvent.click(screen.getByRole('button', { name: 'Play broadcast' }))
-    const before = synth.current!.rate
-    await userEvent.click(screen.getByRole('radio', { name: '1.5x' }))
-    expect(synth.current!.rate).toBeCloseTo(before * 1.5)
+    const first = synth.current!
+    await userEvent.click(screen.getByRole('radio', { name: '2x' }))
+    expect(synth.current).toBe(first) // not restarted
+    expect(screen.getByRole('radio', { name: '2x' })).toBeChecked()
+    expect(localStorage.getItem(SPEED_KEY)).toBe('2')
+    act(() => synth.end())
+    await tick()
+    expect(synth.current!.rate).toBeCloseTo(first.rate * 2)
+  })
+
+  it('plays at the remembered speed', async () => {
+    localStorage.setItem(SPEED_KEY, '1.5')
+    render(<BroadcastReplay debate={debate} />)
     expect(screen.getByRole('radio', { name: '1.5x' })).toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: 'Play broadcast' }))
+    expect(synth.current!.rate).toBeCloseTo(0.95 * 1.5) // the announcer's own rate, times the speed
   })
 
   it('pauses and resumes', async () => {

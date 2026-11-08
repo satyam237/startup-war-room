@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Narrator } from '../../lib/voice/narrator'
 import { createInstantEngine } from '../../lib/voice/instantEngine'
-import { getVoicePref, setVoicePref, type VoicePref } from '../../lib/voice/preference'
+import { getSpeedPref, getVoicePref, setSpeedPref, setVoicePref, type Speed, type VoicePref } from '../../lib/voice/preference'
 import type { HdStatus } from '../../lib/voice/hdEngine'
 import { VoiceError, type Line, type VoiceEngine } from '../../lib/voice/types'
 import { enterVoicePage } from '../../lib/voice/voicePresence'
@@ -18,7 +18,7 @@ export function useBroadcast(lines: Line[], live: boolean) {
   const [notice, setNotice] = useState<string | null>(null)
   const instant = useMemo(() => createInstantEngine(), [])
   const onError = useRef<(e: Error) => void>(() => {})
-  const [narrator] = useState(() => new Narrator({ live, onEngineError: (e) => onError.current(e) }))
+  const [narrator] = useState(() => new Narrator({ live, rate: getSpeedPref(), onEngineError: (e) => onError.current(e) }))
   const snap = useSyncExternalStore(narrator.subscribe, narrator.getSnapshot)
   const unwatch = useRef<(() => void) | null>(null)
   const wanted = useRef(0) // the latest engine request; an older one that resolves late is dropped
@@ -104,7 +104,8 @@ export function useBroadcast(lines: Line[], live: boolean) {
     next: () => narrator.next(),
     prev: () => narrator.prev(),
     jumpToLive: () => narrator.jumpToLive(),
-    setRate: (r: number) => narrator.setRate(r),
+    /** One speed for live and replay, remembered between visits. */
+    setRate: (r: Speed) => { setSpeedPref(r); narrator.setRate(r) },
     stop: () => { wanted.current++; narrator.stop() },
   }
 }

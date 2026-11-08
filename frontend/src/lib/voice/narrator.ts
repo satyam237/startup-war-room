@@ -20,6 +20,8 @@ interface Options {
   live: boolean
   /** Called for failures the narrator cannot handle by itself: a dead engine, or a browser block. */
   onEngineError?: (error: Error) => void
+  /** Starting speed, as a multiple of normal. */
+  rate?: number
 }
 
 /** How many chunks to render ahead of the one playing. Enough to cover a turn change, small enough to drop cheaply. */
@@ -43,6 +45,7 @@ export class Narrator {
 
   constructor(opts: Options) {
     this.opts = opts
+    if (opts.rate) this.snap = { ...this.snap, rate: opts.rate }
   }
 
   subscribe = (fn: () => void) => {
@@ -112,6 +115,7 @@ export class Narrator {
     if (this.lines.length) this.play(this.lines.length - 1)
   }
 
+  /** Applies to the chunk in hand where the engine can (HD), otherwise from the next chunk. Never restarts a line. */
   setRate(rate: number) {
     this.handle?.setRate(rate)
     this.set({ rate })

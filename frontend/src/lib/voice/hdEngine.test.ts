@@ -75,12 +75,12 @@ describe('HD engine', () => {
     expect(t.statuses.map((s) => s.state)).toEqual(['loading', 'loading', 'ready'])
     expect(t.statuses[1].progress).toBeCloseTo(0.5)
     const gen = t.worker.speaks[0]
-    expect(gen).toMatchObject({ text: 'Hello.', voice: KOKORO_VOICE.cto })
+    expect(gen).toMatchObject({ text: 'Hello.', voice: KOKORO_VOICE.cto, speed: 1.25 }) // Kokoro renders at the speed
     expect(started).toBe(false) // still rendering: the UI shows loading, not speaking
     t.worker.reply({ type: 'audio', id: gen.id, wav: new ArrayBuffer(8) })
     await flush()
     expect(t.audios[0].playing).toBe(true)
-    expect(t.audios[0].playbackRate).toBe(1.25)
+    expect(t.audios[0].playbackRate).toBe(1) // already at speed; no time-stretching needed
     expect(started).toBe(true)
     let ended = false
     void h.done.then(() => { ended = true })
@@ -161,7 +161,7 @@ describe('HD engine', () => {
     expect(t.audios[0].playing).toBe(false)
     h.resume()
     expect(t.audios[0].playing).toBe(true)
-    h.setRate(1.5)
+    h.setRate(1.5) // rendered at 1x, so the element makes up the difference at once, pitch preserved
     expect(t.audios[0].playbackRate).toBe(1.5)
     h.stop()
     expect(t.audios[0].playing).toBe(false)
@@ -262,5 +262,27 @@ describe('HD engine', () => {
     await h.done
     vi.advanceTimersByTime(IDLE_MS + 1)
     expect(t.worker.terminated).toBe(true)
+  })
+
+  it('a mid-line speed change applies at once to the playing chunk and to render-ahead after it', async () => {
+    const t = setup()
+    const h = t.engine.speak('Now.', 'vc', 1)
+    t.engine.prepare!('Soon.', 'vc') // rendered ahead at 1x
+    await ready(t.worker)
+    t.worker.reply({ type: 'audio', id: t.worker.speaks[0].id, wav: new ArrayBuffer(8) })
+    await flush()
+    h.setRate(2)
+    expect(t.audios[0].playbackRate).toBe(2)
+    t.engine.prepare!('Later.', 'vc')
+    await flush()
+    expect(t.worker.speaks.map((m) => [m.text, (m as { speed?: number }).speed])).toEqual([['Now.', 1], ['Soon.', 1], ['Later.', 2]])
+    // The chunk rendered ahead at 1x plays at 2x through the element, without a second render.
+    t.audios[0].onended?.()
+    await h.done
+    t.engine.speak('Soon.', 'vc', 2)
+    t.worker.reply({ type: 'audio', id: t.worker.speaks[1].id, wav: new ArrayBuffer(8) })
+    await flush()
+    expect(t.worker.speaks).toHaveLength(3)
+    expect(t.audios[1].playbackRate).toBe(2)
   })
 })

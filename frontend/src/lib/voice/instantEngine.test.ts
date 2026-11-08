@@ -113,16 +113,29 @@ describe('instant voices', () => {
     expect(ended).toBe(true)
   })
 
-  it('a speed change restarts the chunk at the new rate, one task after the cancel', async () => {
+  it('a speed change never restarts or cuts the chunk being said; it applies from the next chunk', async () => {
     const synth = fakeSynth([voice('Alex', 'en-US')])
     const engine = createInstantEngine(synth as unknown as SpeechSynthesis)!
-    const h = engine.speak('Faster.', 'vc', 1)
+    const h = engine.speak('Mid sentence.', 'vc', 1)
     const before = synth.spoken[0].rate
-    h.setRate(1.5)
-    expect(synth.spoken).toHaveLength(1)
+    h.setRate(2)
     await tick()
-    expect(synth.spoken).toHaveLength(2)
-    expect(synth.spoken[1].rate).toBeCloseTo(before * 1.5)
+    expect(synth.cancel).not.toHaveBeenCalled()
+    expect(synth.spoken).toHaveLength(1)
+    synth.end()
+    engine.speak('Next chunk.', 'vc', 2)
+    expect(synth.spoken[1].rate).toBeCloseTo(before * 2)
+  })
+
+  it('a chunk said again after a pause uses the newer speed', async () => {
+    const synth = fakeSynth([voice('Alex', 'en-US')])
+    const engine = createInstantEngine(synth as unknown as SpeechSynthesis)!
+    const h = engine.speak('Again.', 'vc', 1)
+    h.pause()
+    h.setRate(1.5)
+    h.resume()
+    await tick()
+    expect(synth.spoken[1].rate).toBeCloseTo(synth.spoken[0].rate * 1.5)
   })
 
   it('rejects when the browser refuses to speak', async () => {

@@ -2,7 +2,7 @@
 /**
  * Runs Kokoro-82M off the main thread. Loaded only when the listener chooses HD voices.
  * Protocol (see WorkerReply in hdEngine.ts):
- *   in:  { type: 'load' } | { type: 'speak', id, text, voice } | { type: 'cancel' }
+ *   in:  { type: 'load' } | { type: 'speak', id, text, voice, speed } | { type: 'cancel' }
  *   out: progress, ready, load-error, audio (a WAV ArrayBuffer, transferred), speak-error
  * Renders run one at a time; 'cancel' drops every render that has not started.
  * WebGPU is tried first where the browser offers it; any WebGPU failure falls back to WASM.
@@ -14,7 +14,7 @@ import { RenderQueue } from './renderQueue'
 declare const self: DedicatedWorkerGlobalScope
 
 type Device = 'webgpu' | 'wasm'
-type SpeakJob = { type: 'speak'; id: number; text: string; voice: string }
+type SpeakJob = { type: 'speak'; id: number; text: string; voice: string; speed?: number }
 type Incoming = { type: 'load' } | SpeakJob | { type: 'cancel' }
 type Progress = { status: string; file?: string; loaded?: number; total?: number }
 
@@ -75,7 +75,7 @@ function load(): Promise<KokoroTTS> {
 const queue = new RenderQueue<SpeakJob>(async (job) => {
   try {
     const model = await load()
-    const audio = await model.generate(job.text, { voice: job.voice as keyof KokoroTTS['voices'] })
+    const audio = await model.generate(job.text, { voice: job.voice as keyof KokoroTTS['voices'], speed: job.speed ?? 1 })
     const wav = audio.toWav()
     self.postMessage({ type: 'audio', id: job.id, wav }, [wav])
   } catch (err) {

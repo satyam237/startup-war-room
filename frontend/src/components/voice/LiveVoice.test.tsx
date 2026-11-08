@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useReducer, type Dispatch } from 'react'
 import { debateReducer, initialDebateState, type DebateAction } from '../../lib/debateReducer'
-import { HD_CONSENT_KEY, VOICE_KEY } from '../../lib/voice/preference'
+import { HD_CONSENT_KEY, SPEED_KEY, VOICE_KEY } from '../../lib/voice/preference'
 import LiveVoice from './LiveVoice'
 import { VoiceError } from '../../lib/voice/types'
 import { installFakeSpeech } from './voiceTestKit'
@@ -221,5 +221,33 @@ describe('LiveVoice', () => {
     await userEvent.click(screen.getByRole('radio', { name: 'HD (beta)' }))
     await tick()
     expect(screen.getByRole('status', { name: 'Now speaking' })).toHaveTextContent('Investor getting ready')
+  })
+
+  it('has the same speed control, remembered and honoured live', async () => {
+    localStorage.setItem(SPEED_KEY, '2')
+    render(<Room />)
+    finish('r1-vc', 'vc', 'Investor opens.')
+    const group = screen.getByRole('radiogroup', { name: 'Speed' })
+    expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual(['1x', '1.25x', '1.5x', '2x'])
+    expect(screen.getByRole('radio', { name: '2x' })).toBeChecked()
+    await userEvent.click(screen.getByRole('radio', { name: 'Instant' }))
+    expect(synth.current!.rate).toBeCloseTo(1.05 * 2) // the investor's own rate, times 2
+    await userEvent.click(screen.getByRole('radio', { name: '1.25x' }))
+    expect(localStorage.getItem(SPEED_KEY)).toBe('1.25')
+    finish('r1-cto', 'cto', 'Engineer replies.')
+    act(() => synth.end())
+    await tick()
+    expect(synth.current!.text).toBe('Engineer replies.')
+    expect(synth.current!.rate).toBeCloseTo(0.95 * 1.25)
+  })
+
+  it('speed arrows move focus only; Enter picks', async () => {
+    render(<Room />)
+    screen.getByRole('radio', { name: '1x' }).focus()
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}{ArrowRight}')
+    expect(screen.getByRole('radio', { name: '2x' })).toHaveFocus()
+    expect(screen.getByRole('radio', { name: '1x' })).toBeChecked()
+    await userEvent.keyboard('{Enter}')
+    expect(screen.getByRole('radio', { name: '2x' })).toBeChecked()
   })
 })

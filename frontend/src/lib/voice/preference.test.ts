@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { HD_CONSENT_KEY, VOICE_KEY, getVoicePref, hasHdConsent, rememberHdConsent, setVoicePref } from './preference'
+import { HD_CONSENT_KEY, SPEEDS, SPEED_KEY, VOICE_KEY, getSpeedPref, getVoicePref, hasHdConsent, rememberHdConsent, setSpeedPref, setVoicePref } from './preference'
 
 describe('voice preference', () => {
   it('defaults to the instant voices', () => {
@@ -33,5 +33,15 @@ describe('voice preference', () => {
     expect(() => setVoicePref('hd')).not.toThrow()
     spy.mockRestore()
     set.mockRestore()
+  })
+
+  it('offers 1x, 1.25x, 1.5x and 2x, defaults to 1x, and remembers the choice', () => {
+    expect([...SPEEDS]).toEqual([1, 1.25, 1.5, 2])
+    expect(getSpeedPref()).toBe(1)
+    setSpeedPref(2)
+    expect(localStorage.getItem(SPEED_KEY)).toBe('2')
+    expect(getSpeedPref()).toBe(2)
+    localStorage.setItem(SPEED_KEY, '3')
+    expect(getSpeedPref()).toBe(1)
   })
 })

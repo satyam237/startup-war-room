@@ -53,6 +53,9 @@ export const IDLE_MS = 120_000
 /** Grace after the last voice page closes, so moving from the room to the verdict keeps the model. */
 export const LEAVE_MS = 5_000
 
+/** A chunk's audio, and the Kokoro speed it was rendered at. */
+interface Rendered { wav: Promise<ArrayBuffer>; speed: number }
+
 export type HdEngine = VoiceEngine & {
   status(): HdStatus
   /** Lets the worker go after `ms` unless it is used again. */
@@ -71,7 +74,7 @@ export function createHdEngine({ makeWorker, makeAudio, onStatus, idleMs = IDLE_
   let nextId = 1
   const pending = new Map<number, { resolve(wav: ArrayBuffer): void; reject(e: Error): void }>()
   /** Renders asked for and not yet played: the chunk in hand plus the render-ahead. */
-  const rendered = new Map<string, Promise<ArrayBuffer>>()
+  const rendered = new Map<string, Rendered>()
   let active: { stop(): void; sounding(): boolean } | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   /** Set once the listener has left the voice pages; a stop that follows must not push the release back. */
@@ -169,24 +172,34 @@ export function createHdEngine({ makeWorker, makeAudio, onStatus, idleMs = IDLE_
 
   const keyOf = (text: string, role: VoiceRole) => `${role}|${text}`
 
-  function render(text: string, role: VoiceRole): Promise<ArrayBuffer> {
+  /** The speed the listener last asked for. Render-ahead uses it, so upcoming chunks match. */
+  let wantedSpeed = 1
+
+  /**
+   * Renders a chunk at Kokoro's own `speed`, which shortens the speech without touching pitch and leaves less
+   * audio to synthesize, so render-ahead keeps up better at 1.5x and 2x. A chunk rendered at another speed
+   * (before a change) is corrected by the audio element's playbackRate with preservesPitch.
+   */
+  function render(text: string, role: VoiceRole, speed: number): Rendered {
     leaving = false
     arm(idleMs)
     const key = keyOf(text, role)
-    let p = rendered.get(key)
-    if (!p) {
+    let r = rendered.get(key)
+    if (!r) {
       const asked = generation
-      p = load().then(() => new Promise<ArrayBuffer>((resolve, reject) => {
+      const p = load().then(() => new Promise<ArrayBuffer>((resolve, reject) => {
         // Cancelled while the model was loading: never register or post it.
         if (asked !== generation) { reject(cancelled()); return }
         const id = nextId++
         pending.set(id, { resolve, reject })
-        worker!.postMessage({ type: 'speak', id, text, voice: KOKORO_VOICE[role] })
+        worker!.postMessage({ type: 'speak', id, text, voice: KOKORO_VOICE[role], speed })
       }))
-      p.catch(() => { if (rendered.get(key) === p) rendered.delete(key) })
-      rendered.set(key, p)
+      const entry: Rendered = { wav: p, speed }
+      p.catch(() => { if (rendered.get(key) === entry) rendered.delete(key) })
+      rendered.set(key, entry)
+      r = entry
     }
-    return p
+    return r
   }
 
   return {
@@ -194,7 +207,7 @@ export function createHdEngine({ makeWorker, makeAudio, onStatus, idleMs = IDLE_
     status: () => status,
     releaseSoon: (ms) => { if (worker) { leaving = true; arm(ms) } },
     release,
-    prepare(text, role) { void render(text, role).catch(() => {}) },
+    prepare(text, role) { void render(text, role, wantedSpeed).wav.catch(() => {}) },
     cancel() {
       if (worker) worker.postMessage({ type: 'cancel' })
       dropWork(cancelled())
@@ -211,6 +224,10 @@ export function createHdEngine({ makeWorker, makeAudio, onStatus, idleMs = IDLE_
       let paused = false
       let playing = false
       let speed = rate
+      wantedSpeed = rate
+      const job = render(text, role, rate)
+      /** Playback rate that turns the rendered speed into the wanted one. */
+      const correction = () => speed / job.speed
       const finish = () => { playing = false; audio?.release(); audio = null; if (!leaving) arm(idleMs) }
       const failWith = (e: unknown) => {
         if (stopped) return
@@ -224,12 +241,12 @@ export function createHdEngine({ makeWorker, makeAudio, onStatus, idleMs = IDLE_
         a.play().then(() => { if (audio === a) { playing = true; markStarted() } }, (e) => { if (audio === a) failWith(e) })
       }
 
-      render(text, role).then((wav) => {
+      job.wav.then((wav) => {
         rendered.delete(keyOf(text, role)) // played once; a replay renders again rather than holding memory
         if (stopped) return
         const a = makeAudio(wav)
         audio = a
-        a.playbackRate = speed
+        a.playbackRate = correction()
         a.onended = () => { if (audio === a) { finish(); resolve() } }
         a.onerror = () => { if (audio === a) failWith(new VoiceError('chunk', 'The HD audio could not play.')) }
         if (!paused) start(a)
@@ -245,7 +262,8 @@ export function createHdEngine({ makeWorker, makeAudio, onStatus, idleMs = IDLE_
           paused = false
           if (audio) start(audio)
         },
-        setRate(r: number) { speed = r; if (audio) audio.playbackRate = r },
+        // Takes effect at once on the playing chunk; render-ahead after this uses the new speed.
+        setRate(r: number) { speed = r; wantedSpeed = r; if (audio) audio.playbackRate = correction() },
       }
       active = { stop: handle.stop, sounding: () => playing && !stopped }
       return handle
