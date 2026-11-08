@@ -48,14 +48,14 @@ describe('BroadcastReplay', () => {
   it('plays the debate in order from the intro, highlighting the current caption', async () => {
     render(<BroadcastReplay debate={debate} />)
     await userEvent.click(screen.getByRole('button', { name: 'Play broadcast' }))
-    expect(localStorage.getItem(VOICE_KEY)).toBe('instant')
-    const order: string[] = []
-    for (let i = 0; i < 8; i++) {
-      order.push(synth.current!.text)
+    expect(screen.getByRole('radio', { name: 'Instant' })).toBeChecked() // instant is the default
+    const heard: string[] = []
+    for (let i = 0; i < 30 && synth.current; i++) {
+      heard.push(synth.current.text)
       act(() => synth.end())
       await tick()
     }
-    expect(order).toEqual([
+    expect(heard.join(' ')).toBe([
       "Startup War Room. Tonight's pitch. Electricians on demand.",
       'Round 1.',
       'VC speaks.',
@@ -64,7 +64,7 @@ describe('BroadcastReplay', () => {
       'Round 2.',
       'CTO speaks.',
       'The verdict. Go. Confidence 80 percent. Ship it.',
-    ])
+    ].join(' '))
     expect(screen.getByRole('button', { name: 'Play broadcast' })).toBeInTheDocument() // ended: offers to play again
   })
 
@@ -101,7 +101,23 @@ describe('BroadcastReplay', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Pause broadcast' }))
     expect(synth.current).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Resume broadcast' }))
-    expect(synth.current?.text).toBe("Startup War Room. Tonight's pitch. Electricians on demand.")
+    expect(synth.current?.text).toBe('Startup War Room.') // the same first chunk, said again
+  })
+
+  it('a turned-off voice is switched to instant by pressing play', async () => {
+    localStorage.setItem(VOICE_KEY, 'off')
+    render(<BroadcastReplay debate={debate} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Play broadcast' }))
+    expect(localStorage.getItem(VOICE_KEY)).toBe('instant')
+    expect(synth.current?.text).toMatch(/^Startup War Room/)
+  })
+
+  it('next on the last line does nothing', async () => {
+    render(<BroadcastReplay debate={debate} />)
+    await userEvent.click(screen.getByRole('button', { name: /play from here:\s*moderator.*the verdict/i }))
+    const last = synth.current
+    await userEvent.click(screen.getByRole('button', { name: 'Next line' }))
+    expect(synth.current).toBe(last)
   })
 
   it('stops on unmount', async () => {

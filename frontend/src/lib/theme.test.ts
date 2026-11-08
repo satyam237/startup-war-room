@@ -40,8 +40,10 @@ describe('theme storage', () => {
   })
 })
 
-// @ts-ignore node typings come and go with transitive dependencies; tests run under Node, from the frontend folder
-const { readFileSync } = await import('node:fs')
+// Tests run under Node, from the frontend folder. Node's typings may or may not be installed (kokoro-js's
+// dependencies bring them in), so the module name is not a literal and no type directive is needed either way.
+const FS = 'node:fs'
+const { readFileSync } = (await import(/* @vite-ignore */ FS)) as { readFileSync(path: string, encoding: 'utf8'): string }
 const css: string = readFileSync('src/index.css', 'utf8')
 
 /* ---- AA contrast and agent distinctness, read straight from the stylesheet ---- */

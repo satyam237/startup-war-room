@@ -3,7 +3,8 @@ import { Narrator } from '../../lib/voice/narrator'
 import { createInstantEngine } from '../../lib/voice/instantEngine'
 import { getVoicePref, setVoicePref, type VoicePref } from '../../lib/voice/preference'
 import type { HdStatus } from '../../lib/voice/hdEngine'
-import type { Line, VoiceEngine } from '../../lib/voice/types'
+import { VoiceError, type Line, type VoiceEngine } from '../../lib/voice/types'
+import { enterVoicePage } from '../../lib/voice/voicePresence'
 
 type Engine = 'instant' | 'hd'
 
@@ -24,16 +25,20 @@ export function useBroadcast(lines: Line[], live: boolean) {
 
   useEffect(() => { narrator.setLines(lines) }, [narrator, lines])
 
+  // Tells the HD engine a voice page is open; it lets its model go soon after the last one closes.
+  useEffect(() => enterVoicePage(), [])
+
   useEffect(() => {
     const stop = () => narrator.stop()
     window.addEventListener('pagehide', stop)
     return () => {
       window.removeEventListener('pagehide', stop)
       narrator.stop()
+      instant?.dispose()
       unwatch.current?.()
       unwatch.current = null
     }
-  }, [narrator])
+  }, [narrator, instant])
 
   const remember = useCallback((p: VoicePref) => { setVoicePref(p); setPrefState(p) }, [])
 
@@ -58,16 +63,22 @@ export function useBroadcast(lines: Line[], live: boolean) {
     narrator.play(at)
   }, [engineFor, instant, narrator])
 
-  onError.current = (e) => {
-    if (narrator.engineKind === 'hd' && instant) {
-      setNotice(`HD voices could not load (${e.message}). The instant voices are reading instead.`)
-      remember('instant')
-      narrator.setEngine(instant)
-      narrator.play()
-    } else {
-      setNotice('The browser stopped the voice. Press play to try again.')
+  // The narrator reports only what it cannot handle itself (a single bad chunk is retried, then skipped).
+  useEffect(() => {
+    onError.current = (e) => {
+      const kind = e instanceof VoiceError ? e.kind : null
+      if (kind === 'blocked') {
+        setNotice('The browser blocked the sound. Press play to hear it.')
+      } else if (narrator.engineKind === 'hd' && instant) {
+        setNotice(`HD voices could not load (${e.message}). The instant voices are reading instead.`)
+        remember('instant')
+        narrator.setEngine(instant)
+        narrator.play()
+      } else {
+        setNotice('The voice stopped. Press play to try again.')
+      }
     }
-  }
+  })
 
   /** Switches engine. Keeps talking if it was talking; otherwise only remembers the choice. */
   const choose = useCallback((p: VoicePref, thenPlay: boolean) => {

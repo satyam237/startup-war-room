@@ -70,7 +70,7 @@ export default function BroadcastReplay({ debate }: { debate: DebateRecord }) {
             <h2 id="replay-title" className="display text-4xl sm:text-5xl">Replay the fight</h2>
             <p className="mt-1.5 font-body leading-snug">The whole debate read aloud by six voices, from the opening bell to the verdict.</p>
           </div>
-          <OnAir on={status === 'playing'} role={line?.voice ?? null} who={line?.who} />
+          <OnAir on={status === 'playing'} sounding={b.snap.sounding} role={line?.voice ?? null} who={line?.who} />
           <div className="flex items-center gap-2">
             <button type="button" aria-label="Previous line" title="Previous line" onClick={() => b.prev()} disabled={!active}
               className="slab grid size-11 place-items-center bg-panel text-ink">
@@ -103,7 +103,7 @@ export default function BroadcastReplay({ debate }: { debate: DebateRecord }) {
               onPick={pickVoice}
               options={[
                 { value: 'instant', label: 'Instant', disabled: !b.instantAvailable, title: 'Your browser\'s built-in voices. No download.' },
-                { value: 'hd', label: 'HD', title: 'Natural voices that run on this device. One-time download.' },
+                { value: 'hd', label: 'HD (beta)', title: 'Natural voices that run on this device. One-time download.' },
               ]}
             />
             <HdLoading hd={b.hd} />

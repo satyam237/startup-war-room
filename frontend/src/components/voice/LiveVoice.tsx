@@ -41,7 +41,7 @@ export default function LiveVoice({ state }: { state: DebateState }) {
   return (
     <section aria-label="Voice" data-print="hide" className="surface px-3 py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <OnAir on={status === 'playing' && !!line} role={line?.voice ?? null} who={line?.who} />
+        <OnAir on={status === 'playing' && !!line} sounding={b.snap.sounding} role={line?.voice ?? null} who={line?.who} />
         <span className="text-sm font-extrabold" aria-hidden="true">Voice</span>
         <Segmented
           label="Voice"
@@ -50,7 +50,7 @@ export default function LiveVoice({ state }: { state: DebateState }) {
           options={[
             { value: 'off', label: 'Off' },
             { value: 'instant', label: 'Instant', disabled: !b.instantAvailable, title: 'Your browser\'s built-in voices. No download.' },
-            { value: 'hd', label: 'HD', title: 'Natural voices that run on this device. One-time download.' },
+            { value: 'hd', label: 'HD (beta)', title: 'Natural voices that run on this device. One-time download.' },
           ]}
         />
         {b.pref !== 'off' && (
@@ -76,7 +76,7 @@ export default function LiveVoice({ state }: { state: DebateState }) {
       )}
       {b.notice && <p role="status" className="mt-1.5 text-sm font-semibold">{b.notice}</p>}
       {line && (
-        <p aria-label="Captions" data-agent={line.voice === 'founder' ? 'moderator' : line.voice} className="mt-2 border-l-[6px] border-(--agent) pl-3 font-body text-sm leading-snug sm:text-base">
+        <p role="group" aria-label="Captions" data-agent={line.voice === 'founder' ? 'moderator' : line.voice} className="mt-2 border-l-[6px] border-(--agent) pl-3 font-body text-sm leading-snug sm:text-base">
           <span className="mr-1.5 font-ui font-extrabold text-(--agent-ink)">{line.who}</span>
           {b.snap.chunks[b.snap.chunk] ?? ''}
         </p>

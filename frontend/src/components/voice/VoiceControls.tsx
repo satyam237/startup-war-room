@@ -1,10 +1,13 @@
-import { useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { HD_DOWNLOAD_MB } from '../../lib/voice/cast'
 import type { HdStatus } from '../../lib/voice/hdEngine'
 import type { VoiceRole } from '../../lib/voice/types'
 import FighterGlyph from '../FighterGlyph'
 
-/** A segmented radio group in slab style. One tab stop; arrow keys move and pick, like the theme switcher. */
+/**
+ * A segmented radio group in slab style. One tab stop. Arrow keys move focus only; Enter or Space picks,
+ * so arrowing past an option never opens the HD notice or stops the voice.
+ */
 export function Segmented<T extends string>({ label, options, value, onPick }: {
   label: string
   options: { value: T; label: string; disabled?: boolean; title?: string }[]
@@ -13,7 +16,9 @@ export function Segmented<T extends string>({ label, options, value, onPick }: {
 }) {
   const buttons = useRef<(HTMLButtonElement | null)[]>([])
   const enabled = options.map((o, i) => (o.disabled ? -1 : i)).filter((i) => i >= 0)
-  const focusable = options.some((o) => o.value === value && !o.disabled) ? value : options[enabled[0] ?? 0]?.value
+  const selected = options.findIndex((o) => o.value === value && !o.disabled)
+  const [focusAt, setFocusAt] = useState<number | null>(null)
+  const stop = focusAt !== null && enabled.includes(focusAt) ? focusAt : selected >= 0 ? selected : (enabled[0] ?? 0)
 
   function onKeyDown(e: KeyboardEvent, i: number) {
     const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
@@ -21,12 +26,17 @@ export function Segmented<T extends string>({ label, options, value, onPick }: {
     e.preventDefault()
     const at = enabled.indexOf(i)
     const next = enabled[(at + step + enabled.length) % enabled.length]
-    onPick(options[next].value)
+    setFocusAt(next)
     buttons.current[next]?.focus()
   }
 
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex overflow-hidden rounded border-[3px] border-line bg-panel shadow-[3px_3px_0_var(--color-shade)]">
+    <div
+      role="radiogroup"
+      aria-label={label}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusAt(null) }}
+      className="inline-flex overflow-hidden rounded border-[3px] border-line bg-panel shadow-[3px_3px_0_var(--color-shade)]"
+    >
       {options.map((o, i) => {
         const on = o.value === value
         return (
@@ -38,7 +48,7 @@ export function Segmented<T extends string>({ label, options, value, onPick }: {
             aria-checked={on}
             disabled={o.disabled}
             title={o.title}
-            tabIndex={o.value === focusable ? 0 : -1}
+            tabIndex={i === stop ? 0 : -1}
             onClick={() => onPick(o.value)}
             onKeyDown={(e) => onKeyDown(e, i)}
             className={`min-h-9 px-2.5 text-sm font-extrabold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45 ${i > 0 ? 'border-l-[3px] border-line' : ''} ${on ? 'bg-accent text-on-accent' : 'text-ink hover:bg-panel-hi'}`}
@@ -51,23 +61,29 @@ export function Segmented<T extends string>({ label, options, value, onPick }: {
   )
 }
 
-/** The ring's on-air light. Lit in the speaker's colour while a voice is talking. */
-export function OnAir({ on, role, who }: { on: boolean; role: VoiceRole | null; who?: string }) {
+/**
+ * The ring's on-air light. Lit in the speaker's colour while a voice is talking; while an HD chunk is still
+ * rendering it shows the speaker as getting ready instead. A status region, so screen readers hear who is up.
+ */
+export function OnAir({ on, sounding, role, who }: { on: boolean; sounding: boolean; role: VoiceRole | null; who?: string }) {
   const agent = role === 'founder' ? 'moderator' : role
+  const lit = on && sounding && !!agent
+  const preparing = on && !sounding && !!agent
   return (
     <span
+      role="status"
       aria-label="Now speaking"
       data-agent={agent ?? undefined}
-      className={`inline-flex min-h-9 shrink-0 items-center gap-2 rounded border-[3px] border-line px-2 text-sm font-extrabold ${on ? 'bg-(--agent) text-fill-ink' : 'bg-panel-hi text-muted'}`}
-      style={on ? { boxShadow: '0 0 0 3px var(--color-panel), 0 0 0 6px var(--agent)' } : undefined}
+      className={`inline-flex min-h-9 shrink-0 items-center gap-2 rounded border-[3px] border-line px-2 text-sm font-extrabold ${lit ? 'bg-(--agent) text-fill-ink' : 'bg-panel-hi text-muted'}`}
+      style={lit ? { boxShadow: '0 0 0 3px var(--color-panel), 0 0 0 6px var(--agent)' } : preparing ? { borderStyle: 'dashed', borderColor: 'var(--agent)' } : undefined}
     >
-      {on && agent ? (
+      {(lit || preparing) && agent ? (
         <>
           {role === 'founder'
             ? <span aria-hidden="true" className="grid size-5 place-items-center rounded-full border-[3px] border-line bg-panel" />
             : <FighterGlyph agent={agent} className="size-5" />}
-          {who}
-          <span className="eq" aria-hidden="true"><i /><i /><i /><i /></span>
+          {preparing ? `${who} getting ready` : who}
+          {lit && <span className="eq" aria-hidden="true"><i /><i /><i /><i /></span>}
         </>
       ) : (
         <><span aria-hidden="true" className="size-3 rounded-full border-[3px] border-line bg-panel" />Off air</>
@@ -81,8 +97,9 @@ export function HdConsent({ onAccept, onDecline }: { onAccept: () => void; onDec
   return (
     <div role="group" aria-label="HD voices download" className="w-full rounded border-[3px] border-dashed border-line bg-panel-hi px-3 py-2.5">
       <p className="font-body text-sm leading-relaxed">
-        HD voices are a one-time download of about {HD_DOWNLOAD_MB} MB. Your browser keeps the files for next time,
-        and the voices run on this device, so the debate text never leaves it.
+        HD voices are in beta: a one-time download of about {HD_DOWNLOAD_MB} MB from huggingface.co and cdn.jsdelivr.net.
+        Your browser keeps the files for next time, and the voices run on this device, so the debate text never leaves it.
+        On slower devices they may pause between lines while the next one is prepared.
       </p>
       <div className="mt-2 flex flex-wrap gap-2">
         <button type="button" onClick={onAccept} className="slab bg-accent px-3 py-1 text-sm text-on-accent">Download HD voices (about {HD_DOWNLOAD_MB} MB)</button>
