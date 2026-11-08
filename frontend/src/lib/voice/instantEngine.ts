@@ -9,6 +9,9 @@ import type { SpeakHandle, VoiceEngine, VoiceRole } from './types'
 const FEMALE = /female|woman|samantha|victoria|karen|moira|tessa|fiona|veena|zira|aria|jenny|susan|serena|kate|libby|sonia|natasha|hazel|allison|ava|joanna|salli|kimberly|emma|amy|olivia|catherine|nicky/i
 const MALE = /\bmale\b|\bman\b|daniel|alex|fred|david|mark|guy|george|arthur|oliver|rishi|aaron|tom|ryan|thomas|william|james|brian|matthew|justin|joey|eric|lee|gordon/i
 
+/** macOS ships joke and effect voices with English locales. They would turn a debate into a cartoon. */
+const NOVELTY = /^(albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox|junior|ralph|kathy|deranged|hysterical|pipe organ)\b/i
+
 function gender(v: SpeechSynthesisVoice): 'm' | 'f' | null {
   if (FEMALE.test(v.name)) return 'f'
   if (MALE.test(v.name)) return 'm'
@@ -26,8 +29,9 @@ export function instantSupported(): boolean {
  * sharing voices, and to null (the browser default) when there are none.
  */
 export function castInstantVoices(all: SpeechSynthesisVoice[]): Record<VoiceRole, SpeechSynthesisVoice | null> {
-  const english = all.filter((v) => /^en([-_]|$)/i.test(v.lang))
-  const pool = english.length ? english : all
+  const usable = all.filter((v) => !NOVELTY.test(v.name))
+  const english = usable.filter((v) => /^en([-_]|$)/i.test(v.lang))
+  const pool = english.length ? english : usable.length ? usable : all
   const used = new Set<SpeechSynthesisVoice>()
   const usedLangs = new Set<string>()
   const cast = {} as Record<VoiceRole, SpeechSynthesisVoice | null>

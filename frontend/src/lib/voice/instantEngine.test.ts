@@ -51,6 +51,13 @@ describe('instant voices', () => {
     expect(['Daniel', 'Fred', 'Rishi']).toContain(cast.moderator?.name)
   })
 
+  it('never casts the joke voices macOS ships', () => {
+    const cast = castInstantVoices([
+      voice('Bubbles', 'en-US'), voice('Bad News', 'en-US'), voice('Zarvox', 'en-US'), voice('Samantha', 'en-US'),
+    ] as SpeechSynthesisVoice[])
+    expect(Object.values(cast).every((v) => v?.name === 'Samantha')).toBe(true)
+  })
+
   it('reuses voices when only a few are installed, and copes with none', () => {
     const one = castInstantVoices([voice('Alex', 'en-US')] as SpeechSynthesisVoice[])
     expect(Object.values(one).every((v) => v?.name === 'Alex')).toBe(true)
