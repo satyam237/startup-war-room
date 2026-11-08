@@ -5,6 +5,8 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // The HD voice worker (kokoro.worker.ts) is a module worker; its dependencies use import.meta and dynamic imports.
+  worker: { format: 'es' },
   server: { proxy: { '/debates': 'http://localhost:8000' } },
   test: {
     environment: 'jsdom',

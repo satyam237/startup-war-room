@@ -11,6 +11,7 @@ import ExperimentList from '../components/ExperimentList'
 import FeedbackBox from '../components/FeedbackBox'
 import RiskList from '../components/RiskList'
 import Scorecard from '../components/Scorecard'
+import BroadcastReplay from '../components/voice/BroadcastReplay'
 import '../print.css'
 
 type Load =
@@ -160,6 +161,8 @@ export function VerdictBody({ id, debate, verdict, deleteToken, exportHref, feed
           )}
           <span role="status" className="text-sm font-bold">{notice}</span>
         </div>
+
+        {debate.turns?.length ? <BroadcastReplay debate={debate} /> : null}
 
         <PanelRow risks={verdict.risks} lit={lit} onLit={setLit} />
         <Scorecard scorecard={verdict.scorecard} />
