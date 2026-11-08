@@ -27,10 +27,24 @@ function split(piece: string, max: number): string[] {
   return pack(piece.split(' '), max)
 }
 
+/** A full stop that ends a title, a Latin abbreviation, or an initial, not a sentence. */
+const ABBREVIATION = /(?:^|[\s(])(?:(?:Dr|Mr|Mrs|Ms|Prof|Sr|Jr|St|vs|Inc|Ltd|Co|e\.g|i\.e)|[A-Z])\.$/
+
+/** Splits at sentence ends, then joins back any split that followed an abbreviation or an initial. */
+function sentences(clean: string): string[] {
+  const out: string[] = []
+  for (const piece of clean.split(SENTENCE_END)) {
+    const last = out.at(-1)
+    if (last !== undefined && ABBREVIATION.test(last)) out[out.length - 1] = `${last} ${piece}`
+    else out.push(piece)
+  }
+  return out
+}
+
 export function chunkText(text: string, max = CHUNK_MAX): string[] {
   const clean = text.replace(/\s+/g, ' ').trim()
   if (!clean) return []
-  const [first, ...rest] = clean.split(SENTENCE_END).flatMap((s) => split(s, max))
+  const [first, ...rest] = sentences(clean).flatMap((s) => split(s, max))
   // The first sentence goes alone: HD renders a chunk before it plays, so a short opener means sound sooner.
   return [first, ...pack(rest, max)]
 }

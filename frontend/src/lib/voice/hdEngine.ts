@@ -79,7 +79,11 @@ export function createHdEngine({ makeWorker, makeAudio, onStatus, idleMs = IDLE_
 
   const report = (s: HdStatus) => { status = s; onStatus?.(s) }
 
+  /** Bumped whenever work is dropped, so a render still waiting on the model load is never posted after it. */
+  let generation = 0
+
   function dropWork(reason: Error) {
+    generation += 1
     for (const p of pending.values()) p.reject(reason)
     pending.clear()
     rendered.clear()
@@ -108,8 +112,8 @@ export function createHdEngine({ makeWorker, makeAudio, onStatus, idleMs = IDLE_
     timer = setTimeout(() => {
       timer = null
       if (!worker) return
-      // Still talking, or still downloading: check again later.
-      if (active?.sounding() || status.state === 'loading') { arm(idleMs); return }
+      // Still talking, downloading, or rendering: check again later.
+      if (active?.sounding() || status.state === 'loading' || pending.size > 0) { arm(idleMs); return }
       release()
     }, ms)
   }
@@ -171,7 +175,10 @@ export function createHdEngine({ makeWorker, makeAudio, onStatus, idleMs = IDLE_
     const key = keyOf(text, role)
     let p = rendered.get(key)
     if (!p) {
+      const asked = generation
       p = load().then(() => new Promise<ArrayBuffer>((resolve, reject) => {
+        // Cancelled while the model was loading: never register or post it.
+        if (asked !== generation) { reject(cancelled()); return }
         const id = nextId++
         pending.set(id, { resolve, reject })
         worker!.postMessage({ type: 'speak', id, text, voice: KOKORO_VOICE[role] })

@@ -228,8 +228,39 @@ describe('HD engine', () => {
     const h = t.engine.speak('Hi.', 'vc', 1)
     await flush()
     t.engine.releaseSoon(5000)
-    h.stop() // the page's own stop on unmount comes after, and must not push the release back two minutes
+    // The page's own stop on unmount (the narrator stops the chunk and cancels its renders) comes after,
+    // and must not push the release back two minutes.
+    h.stop()
+    t.engine.cancel!()
     vi.advanceTimersByTime(5001)
+    expect(t.worker.terminated).toBe(true)
+  })
+
+  it('a skip during a slow model load never posts the cancelled renders', async () => {
+    const t = setup()
+    t.engine.speak('Old line.', 'vc', 1)
+    t.engine.prepare!('Old ahead 1.', 'vc')
+    t.engine.prepare!('Old ahead 2.', 'vc')
+    await flush()
+    t.engine.cancel!() // the listener skips while the model is still loading
+    t.engine.speak('Wanted.', 'cto', 1)
+    await ready(t.worker) // the load finishes only now
+    expect(t.worker.speaks.map((m) => m.text)).toEqual(['Wanted.'])
+  })
+
+  it('does not let the worker go while a render outlives the idle time', async () => {
+    vi.useFakeTimers()
+    const t = setup()
+    const h = t.engine.speak('A very long render.', 'vc', 1)
+    await ready(t.worker)
+    vi.advanceTimersByTime(IDLE_MS * 2 + 1000)
+    expect(t.worker.terminated).toBe(false)
+    t.worker.reply({ type: 'audio', id: t.worker.speaks[0].id, wav: new ArrayBuffer(8) })
+    await flush()
+    expect(t.audios).toHaveLength(1)
+    t.audios[0].onended?.()
+    await h.done
+    vi.advanceTimersByTime(IDLE_MS + 1)
     expect(t.worker.terminated).toBe(true)
   })
 })

@@ -265,4 +265,19 @@ describe('Narrator', () => {
     await flush()
     expect(n.getSnapshot().sounding).toBe(true)
   })
+
+  it('stays paused when a chunk paused mid-render fails, and tries it again on resume', async () => {
+    const e = new FakeEngine()
+    const n = new Narrator({ live: false })
+    n.setEngine(e)
+    n.setLines([line('a', 'One.'), line('b', 'Two.')])
+    n.play()
+    n.pause()
+    e.last.handle.fail(new VoiceError('chunk', 'render failed'))
+    await flush()
+    expect(e.said).toHaveLength(1) // no retry behind the listener's back
+    expect(n.getSnapshot().status).toBe('paused')
+    n.resume()
+    expect(e.said.map((s) => s.text)).toEqual(['One.', 'One.'])
+  })
 })

@@ -31,4 +31,11 @@ describe('chunkText', () => {
     expect(chunks.join(' ')).toBe(text.replace(/\s+/g, ' ').trim())
     for (const c of chunks) if (!c.includes('xxx')) expect(c.length).toBeLessThanOrEqual(CHUNK_MAX)
   })
+
+  it('does not end a sentence at a common abbreviation or an initial', () => {
+    expect(chunkText('Dr. Patel and Mrs. Gomez agree, e.g. on price vs. Angi Inc. today. Next point.'))
+      .toEqual(['Dr. Patel and Mrs. Gomez agree, e.g. on price vs. Angi Inc. today.', 'Next point.'])
+    expect(chunkText('J. R. Smith built it. It works.')).toEqual(['J. R. Smith built it.', 'It works.'])
+    expect(chunkText('We tried, i.e. twice. Then stopped.')).toEqual(['We tried, i.e. twice.', 'Then stopped.'])
+  })
 })

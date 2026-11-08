@@ -179,6 +179,8 @@ export class Narrator {
         if (gen !== this.gen) return
         this.handle = null
         if (e instanceof VoiceError && e.kind === 'chunk') {
+          // Paused while it was rendering: stay paused on this chunk; resume tries it again.
+          if (this.snap.status === 'paused') return
           // One bad chunk: try it once more, then move past it on the same engine.
           if (!retried) { retried = true; continue }
           retried = false
