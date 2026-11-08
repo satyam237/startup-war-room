@@ -40,7 +40,7 @@ describe('theme storage', () => {
   })
 })
 
-// @ts-expect-error node typings are not installed; tests run under Node, from the frontend folder
+// @ts-ignore node typings come and go with transitive dependencies; tests run under Node, from the frontend folder
 const { readFileSync } = await import('node:fs')
 const css: string = readFileSync('src/index.css', 'utf8')
 

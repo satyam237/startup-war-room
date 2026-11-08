@@ -9,6 +9,7 @@
     "test": "vitest"
   },
   "dependencies": {
+    "kokoro-js": "^1.2.1",
     "motion": "^14.10.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
