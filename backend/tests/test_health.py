@@ -145,7 +145,7 @@ async def test_missing_key_shows_in_health_without_touching_the_network(openrout
 
 
 def test_readme_gives_each_model_its_real_role_and_a_swap_note():
-    readme = (Path(__file__).resolve().parents[2] / "README.md").read_text()
+    readme = (Path(__file__).resolve().parents[2] / "docs" / "DEVELOPMENT.md").read_text()
     assert "| `FAST_MODEL` | `openai/gpt-6.1-terra` | Intake and repeat guards, persona |" in readme
     assert "| `AGENT_MODEL` | `openai/gpt-6.1-terra` | Critic turns, final positions, checkpoints |" in readme
     assert "supported_parameters" in readme and "models_ok" in readme

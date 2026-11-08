@@ -74,7 +74,7 @@ def test_a_reserve_that_leaves_no_turn_budget_is_refused(monkeypatch):
 def test_env_example_and_readme_state_the_token_budget():
     example = (BACKEND_DIR.parent / ".env.example").read_text()
     assert "MAX_TOKENS_PER_DEBATE=120000" in example and "JUDGE_TOKEN_RESERVE=60000" in example
-    readme = (BACKEND_DIR.parent / "README.md").read_text()
+    readme = (BACKEND_DIR.parent / "docs" / "DEVELOPMENT.md").read_text()
     assert "| `MAX_TOKENS_PER_DEBATE` | `120000` |" in readme and "| `JUDGE_TOKEN_RESERVE` | `60000` |" in readme
 
 
@@ -91,6 +91,7 @@ def test_env_example_has_no_duplicate_keys():
 
 def test_readme_deploy_steps_and_delete_token_are_accurate():
     readme = (BACKEND_DIR.parent / "README.md").read_text()
-    deployment = readme.split("## Deployment")[1].split("## Known limits")[0]
+    dev = (BACKEND_DIR.parent / "docs" / "DEVELOPMENT.md").read_text()
+    deployment = dev.split("## Deployment")[1].split("\n## ")[0]
     assert "TRUSTED_PROXY_HOPS=1" in deployment
-    assert "shown once" not in readme and "localStorage" in readme
+    assert "shown once" not in readme + dev and "localStorage" in readme
