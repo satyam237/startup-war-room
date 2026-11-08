@@ -30,5 +30,7 @@ function split(piece: string, max: number): string[] {
 export function chunkText(text: string, max = CHUNK_MAX): string[] {
   const clean = text.replace(/\s+/g, ' ').trim()
   if (!clean) return []
-  return pack(clean.split(SENTENCE_END).flatMap((s) => split(s, max)), max)
+  const [first, ...rest] = clean.split(SENTENCE_END).flatMap((s) => split(s, max))
+  // The first sentence goes alone: HD renders a chunk before it plays, so a short opener means sound sooner.
+  return [first, ...pack(rest, max)]
 }

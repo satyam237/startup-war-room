@@ -1,4 +1,7 @@
-/** The listener's voice choice, remembered between visits. Remembering it never starts sound by itself. */
+/**
+ * The listener's voice choice, remembered between visits. Instant voices are the default.
+ * Remembering a choice never starts sound by itself.
+ */
 export type VoicePref = 'off' | 'instant' | 'hd'
 
 export const VOICE_KEY = 'swr.voice'
@@ -15,7 +18,7 @@ function write(key: string, value: string): void {
 
 export function getVoicePref(): VoicePref {
   const v = read(VOICE_KEY)
-  return PREFS.includes(v as VoicePref) ? (v as VoicePref) : 'off'
+  return PREFS.includes(v as VoicePref) ? (v as VoicePref) : 'instant' // instant is the default: no download
 }
 
 export function setVoicePref(pref: VoicePref): void {

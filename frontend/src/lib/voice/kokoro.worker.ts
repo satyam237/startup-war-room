@@ -2,21 +2,23 @@
 /**
  * Runs Kokoro-82M off the main thread. Loaded only when the listener chooses HD voices.
  * Protocol (see WorkerReply in hdEngine.ts):
- *   in:  { type: 'load' } | { type: 'speak', id, text, voice }
+ *   in:  { type: 'load' } | { type: 'speak', id, text, voice } | { type: 'cancel' }
  *   out: progress, ready, load-error, audio (a WAV ArrayBuffer, transferred), speak-error
+ * Renders run one at a time; 'cancel' drops every render that has not started.
  * WebGPU is tried first where the browser offers it; any WebGPU failure falls back to WASM.
  */
 import { KokoroTTS } from 'kokoro-js'
 import { KOKORO_DTYPE, KOKORO_MODEL, KOKORO_MODEL_BYTES } from './cast'
+import { RenderQueue } from './renderQueue'
 
 declare const self: DedicatedWorkerGlobalScope
 
 type Device = 'webgpu' | 'wasm'
-type Incoming = { type: 'load' } | { type: 'speak'; id: number; text: string; voice: string }
+type SpeakJob = { type: 'speak'; id: number; text: string; voice: string }
+type Incoming = { type: 'load' } | SpeakJob | { type: 'cancel' }
 type Progress = { status: string; file?: string; loaded?: number; total?: number }
 
 let tts: Promise<KokoroTTS> | null = null
-let queue: Promise<unknown> = Promise.resolve() // one render at a time
 
 async function hasWebGPU(): Promise<boolean> {
   try {
@@ -70,19 +72,20 @@ function load(): Promise<KokoroTTS> {
   return tts
 }
 
+const queue = new RenderQueue<SpeakJob>(async (job) => {
+  try {
+    const model = await load()
+    const audio = await model.generate(job.text, { voice: job.voice as keyof KokoroTTS['voices'] })
+    const wav = audio.toWav()
+    self.postMessage({ type: 'audio', id: job.id, wav }, [wav])
+  } catch (err) {
+    self.postMessage({ type: 'speak-error', id: job.id, message: err instanceof Error ? err.message : String(err) })
+  }
+})
+
 self.onmessage = (e: MessageEvent<Incoming>) => {
   const msg = e.data
-  if (msg.type === 'load') { void load().catch(() => {}); return }
-  if (msg.type === 'speak') {
-    queue = queue.then(async () => {
-      try {
-        const model = await load()
-        const audio = await model.generate(msg.text, { voice: msg.voice as keyof KokoroTTS['voices'] })
-        const wav = audio.toWav()
-        self.postMessage({ type: 'audio', id: msg.id, wav }, [wav])
-      } catch (err) {
-        self.postMessage({ type: 'speak-error', id: msg.id, message: err instanceof Error ? err.message : String(err) })
-      }
-    })
-  }
+  if (msg.type === 'load') void load().catch(() => {})
+  else if (msg.type === 'cancel') queue.cancelAll()
+  else if (msg.type === 'speak') queue.push(msg)
 }

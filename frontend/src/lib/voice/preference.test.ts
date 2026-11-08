@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { HD_CONSENT_KEY, VOICE_KEY, getVoicePref, hasHdConsent, rememberHdConsent, setVoicePref } from './preference'
 
 describe('voice preference', () => {
-  it('defaults to off', () => {
-    expect(getVoicePref()).toBe('off')
+  it('defaults to the instant voices', () => {
+    expect(getVoicePref()).toBe('instant')
   })
 
   it('remembers off, instant and HD', () => {
@@ -16,7 +16,7 @@ describe('voice preference', () => {
 
   it('ignores a value it does not know', () => {
     localStorage.setItem(VOICE_KEY, 'loud')
-    expect(getVoicePref()).toBe('off')
+    expect(getVoicePref()).toBe('instant')
   })
 
   it('remembers that the HD download was agreed to', () => {
@@ -29,7 +29,7 @@ describe('voice preference', () => {
   it('survives blocked storage', () => {
     const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked') })
     const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
-    expect(getVoicePref()).toBe('off')
+    expect(getVoicePref()).toBe('instant')
     expect(() => setVoicePref('hd')).not.toThrow()
     spy.mockRestore()
     set.mockRestore()

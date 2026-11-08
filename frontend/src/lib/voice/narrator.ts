@@ -1,5 +1,5 @@
 import { chunkText } from './chunk'
-import type { Line, SpeakHandle, VoiceEngine } from './types'
+import { VoiceError, type Line, type SpeakHandle, type VoiceEngine } from './types'
 
 export type NarratorStatus = 'idle' | 'playing' | 'paused' | 'waiting' | 'ended'
 
@@ -11,26 +11,34 @@ export interface NarratorSnapshot {
   chunk: number
   chunks: string[]
   rate: number
+  /** False while the current chunk is still being prepared (HD renders before it plays). */
+  sounding: boolean
 }
 
 interface Options {
   /** Live mode waits for more lines at the end instead of ending. */
   live: boolean
+  /** Called for failures the narrator cannot handle by itself: a dead engine, or a browser block. */
   onEngineError?: (error: Error) => void
 }
+
+/** How many chunks to render ahead of the one playing. Enough to cover a turn change, small enough to drop cheaply. */
+export const LOOKAHEAD = 3
 
 /**
  * Plays a list of lines through a voice engine, one chunk at a time. Knows nothing about React or the
  * browser. Never makes a sound until `play` is called. Each run carries a generation number, so a late
- * finish from a stopped chunk can never move the queue.
+ * finish from a stopped chunk can never move the queue. The current line is followed by its key, so a
+ * list that is rebuilt around it (a reload, a reordering) does not make it jump.
  */
 export class Narrator {
   private lines: Line[] = []
   private engine: VoiceEngine | null = null
   private handle: SpeakHandle | null = null
+  private currentKey: string | null = null
   private gen = 0
   private listeners = new Set<() => void>()
-  private snap: NarratorSnapshot = { status: 'idle', index: 0, chunk: 0, chunks: [], rate: 1 }
+  private snap: NarratorSnapshot = { status: 'idle', index: 0, chunk: 0, chunks: [], rate: 1, sounding: false }
   private readonly opts: Options
 
   constructor(opts: Options) {
@@ -62,6 +70,9 @@ export class Narrator {
   setLines(lines: Line[]) {
     const grew = lines.length !== this.lines.length
     this.lines = lines
+    // Keep pointing at the line being spoken if the list was rebuilt around it.
+    const at = this.currentKey === null ? -1 : lines.findIndex((l) => l.key === this.currentKey)
+    if (at >= 0 && at !== this.snap.index) this.set({ index: at })
     if (this.snap.status === 'waiting' && this.snap.index < lines.length) void this.run()
     else if (grew) this.set({})
   }
@@ -89,7 +100,11 @@ export class Narrator {
     }
   }
 
-  next() { this.play(Math.min(this.snap.index + 1, this.lines.length - 1)) }
+  next() {
+    if (this.snap.index >= this.lines.length - 1) return // already on the last line
+    this.play(this.snap.index + 1)
+  }
+
   prev() { this.play(Math.max(this.snap.index - 1, 0)) }
 
   /** Skips the backlog: plays the newest line. */
@@ -104,7 +119,7 @@ export class Narrator {
 
   stop() {
     this.halt()
-    this.set({ status: 'idle' })
+    this.set({ status: 'idle', sounding: false })
   }
 
   dispose() {
@@ -112,10 +127,25 @@ export class Narrator {
     this.listeners.clear()
   }
 
+  /** Stops the chunk in hand and throws away anything rendered ahead. */
   private halt() {
     this.gen += 1
     this.handle?.stop()
     this.handle = null
+    this.engine?.cancel?.()
+  }
+
+  /** The next few chunks after (index, chunk), across line boundaries. */
+  private ahead(index: number, chunk: number) {
+    const out: { text: string; voice: Line['voice'] }[] = []
+    let i = index
+    let c = chunk + 1
+    while (out.length < LOOKAHEAD && i < this.lines.length) {
+      const chunks = chunkText(this.lines[i].text)
+      if (c < chunks.length) { out.push({ text: chunks[c], voice: this.lines[i].voice }); c += 1 }
+      else { i += 1; c = 0 }
+    }
+    return out
   }
 
   private async run() {
@@ -123,11 +153,13 @@ export class Narrator {
     const gen = this.gen
     const engine = this.engine
     if (!engine) return
+    let retried = false
     while (gen === this.gen) {
       const { index, chunk } = this.snap
       const line = this.lines[index]
       if (!line) {
-        this.set({ status: this.opts.live ? 'waiting' : 'ended', chunks: [] })
+        this.currentKey = null
+        this.set({ status: this.opts.live ? 'waiting' : 'ended', chunks: [], sounding: false })
         return
       }
       const chunks = chunkText(line.text)
@@ -135,25 +167,35 @@ export class Narrator {
         this.set({ index: index + 1, chunk: 0 })
         continue
       }
+      this.currentKey = line.key
       const handle = engine.speak(chunks[chunk], line.voice, this.snap.rate)
       this.handle = handle
-      this.set({ status: 'playing', chunks })
-      const after = chunk + 1 < chunks.length
-        ? { text: chunks[chunk + 1], voice: line.voice }
-        : this.lines[index + 1] && { text: chunkText(this.lines[index + 1].text)[0], voice: this.lines[index + 1].voice }
-      if (after?.text) engine.prepare?.(after.text, after.voice)
+      this.set({ status: 'playing', chunks, sounding: !handle.started })
+      handle.started?.then(() => { if (gen === this.gen) this.set({ sounding: true }) }, () => {})
+      for (const a of this.ahead(index, chunk)) engine.prepare?.(a.text, a.voice)
       try {
         await handle.done
       } catch (e) {
         if (gen !== this.gen) return
         this.handle = null
-        this.set({ status: 'paused' })
+        if (e instanceof VoiceError && e.kind === 'chunk') {
+          // One bad chunk: try it once more, then move past it on the same engine.
+          if (!retried) { retried = true; continue }
+          retried = false
+          this.set({ chunk: chunk + 1 })
+          continue
+        }
+        this.set({ status: 'paused', sounding: false })
         this.opts.onEngineError?.(e instanceof Error ? e : new Error(String(e)))
         return
       }
       if (gen !== this.gen) return
+      retried = false
       this.handle = null
-      this.set({ chunk: chunk + 1 })
+      // Find the line again by key: the list may have been rebuilt while it played.
+      const now = this.lines.findIndex((l) => l.key === line.key)
+      if (now === -1) this.set({ chunk: 0 }) // it is gone; whatever took its place is next
+      else this.set({ index: now, chunk: chunk + 1 })
     }
   }
 }

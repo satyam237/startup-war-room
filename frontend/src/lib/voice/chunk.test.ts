@@ -12,9 +12,9 @@ describe('chunkText', () => {
     expect(chunkText('One line.')).toEqual(['One line.'])
   })
 
-  it('splits at sentence ends and packs sentences up to the limit', () => {
-    const s = 'First point here. Second point here! Third point here?'
-    expect(chunkText(s, 40)).toEqual(['First point here. Second point here!', 'Third point here?'])
+  it('speaks the first sentence alone, then packs sentences up to the limit', () => {
+    const s = 'First point here. Second point here! Third point here? Fourth.'
+    expect(chunkText(s, 40)).toEqual(['First point here.', 'Second point here! Third point here?', 'Fourth.'])
   })
 
   it('breaks a sentence longer than the limit at commas, then at spaces', () => {

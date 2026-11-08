@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { castInstantVoices, createInstantEngine, instantSupported } from './instantEngine'
 
 type V = Pick<SpeechSynthesisVoice, 'name' | 'lang' | 'localService' | 'default' | 'voiceURI'>
+const tick = () => new Promise<void>((r) => setTimeout(r, 0))
 const voice = (name: string, lang: string): V => ({ name, lang, localService: true, default: false, voiceURI: name })
 
 class FakeUtterance {
@@ -21,8 +22,10 @@ function fakeSynth(voices: V[]) {
     spoken,
     speak: vi.fn((u: FakeUtterance) => { spoken.push(u); current = u }),
     cancel: vi.fn(() => { const u = current; current = null; u?.onerror?.({ error: 'interrupted' }) }),
-    getVoices: () => voices as SpeechSynthesisVoice[],
-    addEventListener: vi.fn(),
+    voices,
+    getVoices: () => synth.voices as SpeechSynthesisVoice[],
+    listeners: [] as (() => void)[],
+    addEventListener: vi.fn((_: string, fn: () => void) => { synth.listeners.push(fn) }),
     removeEventListener: vi.fn(),
     end() { const u = current; current = null; u?.onend?.() },
   }
@@ -80,10 +83,13 @@ describe('instant voices', () => {
     expect(ended).toBe(true)
   })
 
-  it('gives the roles different pitch or rate so one installed voice still reads as several people', () => {
+  it('gives the roles different pitch or rate so one installed voice still reads as several people', async () => {
     const synth = fakeSynth([voice('Alex', 'en-US')])
     const engine = createInstantEngine(synth as unknown as SpeechSynthesis)!
-    for (const r of ['vc', 'customer', 'cto', 'competitor', 'moderator', 'founder'] as const) engine.speak('x', r, 1)
+    for (const r of ['vc', 'customer', 'cto', 'competitor', 'moderator', 'founder'] as const) {
+      engine.speak('x', r, 1)
+      await tick() // each new chunk cancels the last, and speech after a cancel waits one task
+    }
     const tones = synth.spoken.map((u) => `${u.pitch}/${u.rate}`)
     expect(new Set(tones).size).toBe(6)
   })
@@ -99,18 +105,22 @@ describe('instant voices', () => {
     await Promise.resolve()
     expect(ended).toBe(false) // the cancel is not the end of the chunk
     h.resume()
+    expect(synth.spoken).toHaveLength(1) // not in the same task as the cancel
+    await tick()
     expect(synth.spoken.map((u) => u.text)).toEqual(['Same chunk.', 'Same chunk.'])
     synth.end()
     await Promise.resolve()
     expect(ended).toBe(true)
   })
 
-  it('a speed change restarts the chunk at the new rate', () => {
+  it('a speed change restarts the chunk at the new rate, one task after the cancel', async () => {
     const synth = fakeSynth([voice('Alex', 'en-US')])
     const engine = createInstantEngine(synth as unknown as SpeechSynthesis)!
     const h = engine.speak('Faster.', 'vc', 1)
     const before = synth.spoken[0].rate
     h.setRate(1.5)
+    expect(synth.spoken).toHaveLength(1)
+    await tick()
     expect(synth.spoken).toHaveLength(2)
     expect(synth.spoken[1].rate).toBeCloseTo(before * 1.5)
   })
@@ -120,6 +130,43 @@ describe('instant voices', () => {
     const engine = createInstantEngine(synth as unknown as SpeechSynthesis)!
     const h = engine.speak('No.', 'vc', 1)
     synth.spoken[0].onerror?.({ error: 'not-allowed' })
-    await expect(h.done).rejects.toThrow('not-allowed')
+    await expect(h.done).rejects.toMatchObject({ kind: 'blocked' })
+  })
+
+  it('reports other speech errors as a failed chunk, not a dead engine', async () => {
+    const synth = fakeSynth([voice('Alex', 'en-US')])
+    const engine = createInstantEngine(synth as unknown as SpeechSynthesis)!
+    const h = engine.speak('No.', 'vc', 1)
+    synth.spoken[0].onerror?.({ error: 'synthesis-failed' })
+    await expect(h.done).rejects.toMatchObject({ kind: 'chunk' })
+  })
+
+  it('does not cancel when the previous chunk already ended, so the next one speaks at once', () => {
+    const synth = fakeSynth([voice('Alex', 'en-US')])
+    const engine = createInstantEngine(synth as unknown as SpeechSynthesis)!
+    engine.speak('One.', 'vc', 1)
+    synth.end()
+    engine.speak('Two.', 'vc', 1)
+    expect(synth.cancel).not.toHaveBeenCalled()
+    expect(synth.spoken.map((u) => u.text)).toEqual(['One.', 'Two.'])
+  })
+
+  it('picks up voices that arrive late, and keeps a role on the voice it first spoke with', () => {
+    const synth = fakeSynth([])
+    const engine = createInstantEngine(synth as unknown as SpeechSynthesis)!
+    engine.speak('Before.', 'customer', 1)
+    expect(synth.spoken[0].voice).toBeNull() // nothing installed yet: the browser default
+    synth.end()
+    synth.voices = [voice('Samantha', 'en-US'), voice('Daniel', 'en-GB')]
+    synth.listeners.forEach((fn) => fn()) // voiceschanged
+    engine.speak('After.', 'customer', 1)
+    expect(synth.spoken[1].voice?.name).toBe('Samantha')
+    synth.end()
+    // A better match for the customer arrives later; she keeps Samantha.
+    synth.voices = [voice('Karen', 'en-AU'), ...synth.voices]
+    synth.listeners.forEach((fn) => fn())
+    engine.speak('Still me.', 'customer', 1)
+    expect(synth.spoken[2].voice?.name).toBe('Samantha')
+    expect(synth.addEventListener).toHaveBeenCalledWith('voiceschanged', expect.any(Function))
   })
 })

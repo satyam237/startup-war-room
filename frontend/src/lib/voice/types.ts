@@ -14,9 +14,27 @@ export interface Line {
   text: string
 }
 
+/**
+ * Why a chunk did not play.
+ *   load     the engine itself is unusable (the HD model did not load): switch engines
+ *   chunk    this one chunk failed to render or play: retry it once, then skip it
+ *   blocked  the browser refused to make sound without a fresh tap (Safari's play() NotAllowedError)
+ */
+export type VoiceErrorKind = 'load' | 'chunk' | 'blocked'
+
+export class VoiceError extends Error {
+  readonly kind: VoiceErrorKind
+  constructor(kind: VoiceErrorKind, message: string) {
+    super(message)
+    this.kind = kind
+  }
+}
+
 /** One chunk being spoken. `done` resolves when it finishes on its own, and also when it is stopped. */
 export interface SpeakHandle {
   done: Promise<void>
+  /** Resolves when sound actually starts. Absent means it starts at once. HD uses it while a chunk renders. */
+  started?: Promise<void>
   stop(): void
   pause(): void
   resume(): void
@@ -26,7 +44,9 @@ export interface SpeakHandle {
 export interface VoiceEngine {
   readonly kind: 'instant' | 'hd'
   speak(text: string, voice: VoiceRole, rate: number): SpeakHandle
-  /** Optional warm-up for a chunk that is coming next. */
+  /** Optional render-ahead for a chunk that is coming soon. */
   prepare?(text: string, voice: VoiceRole): void
+  /** Drops all render-ahead work. Called on stop and on every skip. */
+  cancel?(): void
   dispose(): void
 }

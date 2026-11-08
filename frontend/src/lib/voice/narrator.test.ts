@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Narrator } from './narrator'
-import type { Line, SpeakHandle, VoiceEngine } from './types'
+import { LOOKAHEAD, Narrator } from './narrator'
+import { VoiceError, type Line, type SpeakHandle, type VoiceEngine } from './types'
 
 /** An engine that speaks nothing: each chunk waits until the test finishes it. */
 class FakeEngine implements VoiceEngine {
@@ -22,6 +22,8 @@ class FakeEngine implements VoiceEngine {
     return handle
   }
   prepare(text: string) { this.prepared.push(text) }
+  cancels = 0
+  cancel() { this.cancels += 1; this.prepared = [] }
   dispose() {}
   get last() { return this.said.at(-1)! }
 }
@@ -163,5 +165,104 @@ describe('Narrator', () => {
     await flush()
     expect(e.said).toHaveLength(1)
     expect(n.getSnapshot().status).toBe('idle')
+  })
+
+  it(`renders up to ${LOOKAHEAD} chunks ahead, across lines, and drops them on a skip`, () => {
+    const e = new FakeEngine()
+    const n = new Narrator({ live: false })
+    n.setEngine(e)
+    n.setLines([line('a', 'One.'), line('b', 'Two.'), line('c', 'Three.'), line('d', 'Four.'), line('e', 'Five.')])
+    n.play()
+    expect(e.prepared).toEqual(['Two.', 'Three.', 'Four.'])
+    const before = e.cancels
+    n.next()
+    expect(e.cancels).toBe(before + 1)
+    expect(e.prepared).toEqual(['Three.', 'Four.', 'Five.'])
+    n.stop()
+    expect(e.cancels).toBe(before + 2)
+    expect(e.prepared).toEqual([])
+  })
+
+  it('next on the last line does nothing', () => {
+    const e = new FakeEngine()
+    const n = new Narrator({ live: false })
+    n.setEngine(e)
+    n.setLines([line('a', 'One.'), line('b', 'Two.')])
+    n.play(1)
+    const h = e.last.handle
+    n.next()
+    expect(h.stopped).toBe(false)
+    expect(e.said).toHaveLength(1)
+  })
+
+  it('retries a failed chunk once, then skips it, on the same engine', async () => {
+    const onEngineError = vi.fn()
+    const e = new FakeEngine()
+    const n = new Narrator({ live: false, onEngineError })
+    n.setEngine(e)
+    n.setLines([line('a', 'Bad.'), line('b', 'Good.')])
+    n.play()
+    e.last.handle.fail(new VoiceError('chunk', 'render failed'))
+    await flush()
+    expect(e.said.map((s) => s.text)).toEqual(['Bad.', 'Bad.'])
+    e.last.handle.fail(new VoiceError('chunk', 'render failed'))
+    await flush()
+    expect(e.said.map((s) => s.text)).toEqual(['Bad.', 'Bad.', 'Good.'])
+    expect(onEngineError).not.toHaveBeenCalled()
+  })
+
+  it('pauses and reports a browser block instead of skipping', async () => {
+    const onEngineError = vi.fn()
+    const e = new FakeEngine()
+    const n = new Narrator({ live: false, onEngineError })
+    n.setEngine(e)
+    n.setLines([line('a', 'One.')])
+    n.play()
+    e.last.handle.fail(new VoiceError('blocked', 'tap first'))
+    await flush()
+    expect(n.getSnapshot().status).toBe('paused')
+    expect(onEngineError).toHaveBeenCalledWith(expect.objectContaining({ kind: 'blocked' }))
+    n.resume()
+    expect(e.said.map((s) => s.text)).toEqual(['One.', 'One.'])
+  })
+
+  it('follows the current line by key when the list is rebuilt around it', async () => {
+    const e = new FakeEngine()
+    const n = new Narrator({ live: true })
+    n.setEngine(e)
+    n.setLines([line('a', 'One.'), line('b', 'Two.'), line('c', 'Three.')])
+    n.play(1)
+    // A rebuilt list with a new line in front: still on "b", and "c" comes next.
+    n.setLines([line('x', 'Zero.'), line('a', 'One.'), line('b', 'Two.'), line('c', 'Three.')])
+    expect(n.getSnapshot().index).toBe(2)
+    await finishLast(e)
+    expect(e.last.text).toBe('Three.')
+  })
+
+  it('carries on with what took its place when the current line disappears', async () => {
+    const e = new FakeEngine()
+    const n = new Narrator({ live: true })
+    n.setEngine(e)
+    n.setLines([line('a', 'One.'), line('b', 'Two.'), line('c', 'Three.')])
+    n.play(1)
+    n.setLines([line('a', 'One.'), line('c', 'Three.')])
+    await finishLast(e)
+    expect(e.last.text).toBe('Three.')
+    expect(e.said.map((s) => s.text)).toEqual(['Two.', 'Three.'])
+  })
+
+  it('shows not-yet-sounding until an engine says the chunk started', async () => {
+    const e = new FakeEngine()
+    let start!: () => void
+    const speak = e.speak.bind(e)
+    e.speak = (text, voice, rate) => ({ ...speak(text, voice, rate), started: new Promise<void>((r) => { start = r }) })
+    const n = new Narrator({ live: false })
+    n.setEngine(e)
+    n.setLines([line('a', 'One.')])
+    n.play()
+    expect(n.getSnapshot()).toMatchObject({ status: 'playing', sounding: false })
+    start()
+    await flush()
+    expect(n.getSnapshot().sounding).toBe(true)
   })
 })
