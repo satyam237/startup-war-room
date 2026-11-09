@@ -9,6 +9,7 @@ import { useSearchParams } from 'react-router-dom'
 import DebateView from '../components/DebateView'
 import { debateReducer, initialDebateState, type DebateAction } from '../lib/debateReducer'
 import { VerdictBody } from '../pages/Verdict'
+import type { StoredTurn } from '../lib/api'
 import { DEMO_PITCH, demoScript, type DemoStep, type VerdictKind } from './demoDebate'
 
 const JUMPS: Record<string, (s: DemoStep) => boolean> = {
@@ -58,7 +59,14 @@ export default function DemoRoom() {
   }, [steps, speed, at])
 
   const finished = state.verdict !== null && (state.status === 'complete' || state.status === 'partial')
-  const record = { id: 'demo', pitch: DEMO_PITCH, status: state.status, verdict: state.verdict }
+  // The same shape GET /debates/{id} returns, so the broadcast replay has stored turns to read.
+  const turns = state.feed.flatMap((item, i): StoredTurn[] => {
+    if (item.kind === 'checkpoint') return [{ id: i + 1, round: item.round, agent: 'moderator', text: item.summary, details: { top_disagreements: item.top_disagreements } }]
+    if (item.kind !== 'turn') return []
+    const t = state.turns[item.id]
+    return t.text.trim() ? [{ id: i + 1, round: t.round, agent: t.agent, text: t.text }] : []
+  })
+  const record = { id: 'demo', pitch: DEMO_PITCH, status: state.status, verdict: state.verdict, rebuttal: state.rebuttal, turns }
 
   return (
     <>

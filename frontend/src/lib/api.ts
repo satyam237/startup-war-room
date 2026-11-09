@@ -1,4 +1,4 @@
-import type { Verdict } from './debateReducer'
+import type { AgentId, Verdict } from './debateReducer'
 
 export const API_BASE: string = import.meta.env.VITE_API_URL ?? ''
 
@@ -53,11 +53,22 @@ export async function createDebate(body: CreateDebateBody): Promise<CreateDebate
   return { kind: 'created', debateId: data.debate_id, deleteToken: data.delete_token }
 }
 
+/** One stored row of GET /debates/{id} `turns`. Moderator rows are the checkpoints. */
+export interface StoredTurn {
+  id: number
+  round: number
+  agent: AgentId
+  text: string
+  details?: Record<string, unknown> | null
+}
+
 export interface DebateRecord {
   id: string
   pitch: string
   status: string
   verdict?: Verdict | null
+  rebuttal?: string | null
+  turns?: StoredTurn[]
   [key: string]: unknown
 }
 

@@ -17,6 +17,7 @@ import { useCalm } from './motion/useCalm'
 import { useCaughtUp } from './motion/useCaughtUp'
 import { useArenaCues } from './arenaCues'
 import { AGENT_NAME, tonight } from './agentInfo'
+import LiveVoice from './voice/LiveVoice'
 
 const MAX_TURNS = 14
 const LEFT: AgentId[] = ['vc', 'customer']
@@ -91,6 +92,7 @@ export default function DebateView({ id, state, pitch, lost, sendRebuttal }: Pro
           turnsByRound={turnsByRound}
           checkpointRounds={state.checkpoints.map((c) => c.round)}
         />
+        <LiveVoice state={state} />
       </header>
 
       {stopped && (

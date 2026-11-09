@@ -257,4 +257,32 @@ describe('Verdict page', () => {
     expect(await screen.findByText(/no verdict yet/i)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /back to the room/i })).toHaveAttribute('href', '/d/abc')
   })
+
+  it('offers a broadcast replay of a finished debate on its share link, without playing it', async () => {
+    const speak = vi.fn()
+    vi.stubGlobal('speechSynthesis', { speak, cancel: vi.fn(), getVoices: () => [] })
+    fetchMock.mockReturnValue(json(200, {
+      ...debate,
+      rebuttal: null,
+      turns: [{ id: 1, round: 1, agent: 'vc', text: 'Will this return the fund?', details: null }],
+    }))
+    setup()
+    expect(await screen.findByRole('heading', { name: /replay the fight/i })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/debates/abc'), undefined)
+    const captions = within(screen.getByRole('list', { name: 'Broadcast captions' })).getAllByRole('listitem')
+    expect(captions.map((c) => c.textContent)).toEqual([
+      expect.stringContaining("Tonight's pitch"),
+      expect.stringContaining('Round 1.'),
+      expect.stringContaining('Will this return the fund?'),
+      expect.stringContaining('The verdict. Pivot.'),
+    ])
+    expect(speak).not.toHaveBeenCalled()
+  })
+
+  it('shows no replay when the record has no stored turns', async () => {
+    fetchMock.mockReturnValue(json(200, debate))
+    setup()
+    await screen.findByRole('heading', { name: /pivot/i })
+    expect(screen.queryByRole('heading', { name: /replay the fight/i })).not.toBeInTheDocument()
+  })
 })
